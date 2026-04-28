@@ -1,6 +1,7 @@
 stages:
   - test
   - build
+  - push
 
 test:
   image: python:3.11
@@ -14,6 +15,19 @@ test:
 build:
   image: docker:24.0.5
   stage: build
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    - cd sample-app
+  script:
+    - docker build -t sample-app:test .
+
+push:
+  image: docker:24.0.5
+  stage: push
   services:
     - docker:24.0.5-dind
   variables:
