@@ -7,7 +7,7 @@ logger = get_logger()
 @app.get("/")
 def root():
     logger.info("Root endpoint hit")
-    return {"message": "AI DevOps Copilot is running"}
+    return {"message": "Version 2 deployed 🚀"}
 
 @app.get("/health")
 def health():
