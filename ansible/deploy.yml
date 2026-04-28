@@ -1,0 +1,4 @@
+- name: Deploy app to Kubernetes
+  hosts: local
+  roles:
+    - app_deploy

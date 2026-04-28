@@ -1,0 +1,8 @@
+- name: Apply Kubernetes deployment
+  shell: cmd.exe /c kubectl apply -f ../k8s/deployment.yaml
+
+- name: Apply Kubernetes service
+  shell: cmd.exe /c kubectl apply -f ../k8s/service.yaml
+
+- name: Restart deployment
+  shell: cmd.exe /c kubectl rollout restart deployment sample-app
