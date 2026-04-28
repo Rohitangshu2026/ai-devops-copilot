@@ -1,0 +1,11 @@
+stages:
+  - test
+
+test:
+  image: python:3.11
+  stage: test
+  before_script:
+    - cd sample-app
+    - pip install -r requirements.txt
+  script:
+    - pytest
