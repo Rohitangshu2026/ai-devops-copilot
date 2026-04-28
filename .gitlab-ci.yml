@@ -21,5 +21,7 @@ build:
     DOCKER_TLS_CERTDIR: ""
   before_script:
     - cd sample-app
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
   script:
-    - docker build -t sample-app:ci .
+    - docker build -t $DOCKER_USERNAME/sample-app:latest .
+    - docker push $DOCKER_USERNAME/sample-app:latest
