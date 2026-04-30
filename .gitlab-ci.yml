@@ -8,6 +8,7 @@ test:
   stage: test
   image: python:3.10
   script:
+    - cd sample-app
     - pip install -r requirements.txt
     - pytest
 
