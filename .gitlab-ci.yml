@@ -115,9 +115,19 @@ deploy:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
   before_script:
-    # Shell executor runs directly on the Mac — kubectl and ~/.kube/config
-    # already exist from Minikube. Verify the cluster is up before deploying.
-    - /usr/local/bin/minikube status || /usr/local/bin/minikube start
+    # Homebrew binaries are not automatically on PATH inside GitLab Runner jobs
+    - export PATH="/opt/homebrew/bin:$PATH"
+
+    # Debug visibility in CI logs
+    - echo "PATH=$PATH"
+    - which minikube
+    - which kubectl
+    - which ansible || true
+
+    # Ensure Minikube cluster is running
+    - minikube status || minikube start
+
+    # Verify Kubernetes connectivity
     - kubectl cluster-info
   script:
     - cd ansible
