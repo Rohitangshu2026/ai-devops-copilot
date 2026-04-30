@@ -31,6 +31,8 @@ push:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
+    - cd sample-app
+    - docker build -t $DOCKER_USERNAME/sample-app:latest .
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
     - docker push $DOCKER_USERNAME/sample-app:latest
 
@@ -38,4 +40,5 @@ deploy:
   stage: deploy
   when: manual
   script:
-    - echo "Run ansible locally to deploy latest image"
+    - echo "To deploy locally, run:"
+    - echo "cd ansible && ansible-playbook -i inventory.ini deploy.yml"
