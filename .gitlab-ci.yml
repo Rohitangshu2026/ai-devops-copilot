@@ -4,9 +4,6 @@ stages:
   - push
   - deploy
 
-variables:
-  IMAGE_NAME: $DOCKER_USERNAME/sample-app
-
 test:
   stage: test
   image: python:3.11
@@ -23,8 +20,8 @@ build:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
-    - docker build -t $IMAGE_NAME:$CI_COMMIT_SHORT_SHA sample-app/
-    - docker save $IMAGE_NAME:$CI_COMMIT_SHORT_SHA > image.tar
+    - docker build -t $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA sample-app/
+    - docker save $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA > image.tar
   artifacts:
     paths:
       - image.tar
@@ -43,9 +40,9 @@ push:
   script:
     - docker load < image.tar
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    - docker tag $IMAGE_NAME:$CI_COMMIT_SHORT_SHA $IMAGE_NAME:latest
-    - docker push $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
-    - docker push $IMAGE_NAME:latest
+    - docker tag $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA $DOCKER_USERNAME/sample-app:latest
+    - docker push $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA
+    - docker push $DOCKER_USERNAME/sample-app:latest
 
 deploy:
   stage: deploy
