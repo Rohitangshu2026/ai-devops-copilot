@@ -87,6 +87,25 @@ services:
     networks:
       - elk
 
+  # ── Agent Backend ──────────────────────────────────────────────────────────
+  agent-backend:
+    build: ./agent-backend
+    container_name: agent-backend
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./agent-backend/.env
+    networks:
+      - elk
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   app-logs:
 
