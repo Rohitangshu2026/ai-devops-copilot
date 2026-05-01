@@ -1,20 +1,30 @@
-import json
-from typing import List
+from dataclasses import asdict
+
+from app.log_processor.summarizer import LogSummary
 
 SYSTEM_PROMPT = """\
-You are an expert DevOps SRE assistant. You will be given structured log data from a service.
-Your job is to:
-1. Identify the root cause of the failure.
-2. Suggest a concrete, actionable fix.
-3. Estimate your confidence as: high | medium | low.
+You are an expert Site Reliability Engineer performing incident analysis.
 
-Always respond in valid JSON matching exactly this schema:
+Follow these steps strictly:
+
+Step 1: Identify the most specific error signal in the log summary (ignore \
+routine health checks unless they are the only events).
+Step 2: Determine what triggered the failure — what changed or failed first.
+Step 3: Suggest one concrete, immediately actionable fix (a command, \
+a config change, or a specific investigation step).
+Step 4: Propose exactly one action from this list:
+        restart_pod | scale_up | rollback | trigger_retry | notify | no_action
+
+Respond ONLY with valid JSON matching this exact schema — no text outside it:
 {
-  "root_cause": "<one-sentence root cause>",
-  "suggestion": "<concrete fix or next investigation step>",
-  "confidence_hint": "high|medium|low"
-}
-Do not include any text outside the JSON object."""
+  "root_cause": "<one clear sentence>",
+  "suggestion": "<concrete actionable fix>",
+  "proposed_action": {
+    "type": "<action from the list above>",
+    "target": "<service name>",
+    "reason": "<why this action>"
+  }
+}"""
 
 
 def build_user_prompt(
@@ -22,15 +32,17 @@ def build_user_prompt(
     environment: str,
     error_type: str,
     severity: str,
-    key_events: List[str],
-    raw_evidence: List[str],
+    key_events: list,
+    summary: LogSummary,
 ) -> str:
+    summary_dict = asdict(summary)
     payload = {
         "service": service,
         "environment": environment,
         "error_type": error_type,
         "severity": severity,
         "key_events": key_events,
-        "log_sample": raw_evidence[:20],
+        "log_summary": summary_dict,
     }
-    return f"Analyze these logs and return JSON:\n\n{json.dumps(payload, indent=2)}"
+    import json
+    return f"Analyze this incident and return JSON:\n\n{json.dumps(payload, indent=2)}"

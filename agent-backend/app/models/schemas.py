@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
@@ -18,8 +18,8 @@ class AnalysisRequest(BaseModel):
 
 
 class ParsedLog(BaseModel):
-    error_type: str  # dependency_error | build_failure | test_failure | runtime_crash | unknown
-    severity: str    # low | medium | high | critical
+    error_type: str
+    severity: str
     key_events: List[str]
     summary: str
 
@@ -29,6 +29,10 @@ class AnalysisResult(BaseModel):
     environment: str
     root_cause: str
     suggestion: str
-    confidence_hint: str  # high | medium | low — from LLM, replaced by engine in Phase 5
+    confidence_hint: str
+    confidence_score: int
+    confidence_source: str = "signal"
     parsed_log: ParsedLog
     raw_evidence: List[str]
+    log_summary: Dict[str, Any]
+    proposed_action: Optional[Dict[str, Any]] = None
