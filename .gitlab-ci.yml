@@ -4,9 +4,12 @@ stages:
   - push
   - deploy
 
+variables:
+  IMAGE_NAME: $DOCKER_USERNAME/sample-app
+
 test:
   stage: test
-  image: python:3.10
+  image: python:3.11
   script:
     - cd sample-app
     - pip install -r requirements.txt
@@ -20,8 +23,12 @@ build:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
-    - cd sample-app
-    - docker build -t $DOCKER_USERNAME/sample-app:latest .
+    - docker build -t $IMAGE_NAME:$CI_COMMIT_SHORT_SHA sample-app/
+    - docker save $IMAGE_NAME:$CI_COMMIT_SHORT_SHA > image.tar
+  artifacts:
+    paths:
+      - image.tar
+    expire_in: 1 hour
 
 push:
   stage: push
@@ -30,15 +37,22 @@ push:
     - docker:dind
   variables:
     DOCKER_TLS_CERTDIR: ""
+  needs: [build]
+  only:
+    - main
   script:
-    - cd sample-app
-    - docker build -t $DOCKER_USERNAME/sample-app:latest .
+    - docker load < image.tar
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    - docker push $DOCKER_USERNAME/sample-app:latest
+    - docker tag $IMAGE_NAME:$CI_COMMIT_SHORT_SHA $IMAGE_NAME:latest
+    - docker push $IMAGE_NAME:$CI_COMMIT_SHORT_SHA
+    - docker push $IMAGE_NAME:latest
 
 deploy:
   stage: deploy
+  image: alpine:latest
   when: manual
+  only:
+    - main
   script:
-    - echo "To deploy locally, run:"
+    - echo "To deploy, run:"
     - echo "cd ansible && ansible-playbook -i inventory.ini deploy.yml"
