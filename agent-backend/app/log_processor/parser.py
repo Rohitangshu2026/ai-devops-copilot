@@ -1,3 +1,4 @@
+import json
 import re
 from typing import List
 
@@ -9,8 +10,37 @@ _PATTERNS = [
 ]
 
 
+def _unwrap(log: dict) -> dict:
+    """Parse inner JSON from the message field if present."""
+    msg = log.get("message", "")
+    if isinstance(msg, str) and msg.startswith("{"):
+        try:
+            return {**log, **json.loads(msg)}
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return log
+
+
+def _readable(log: dict) -> str:
+    event = log.get("event", "")
+    endpoint = log.get("endpoint", "")
+    status = log.get("status", "")
+    message = log.get("message", "")
+    if event and endpoint and status:
+        return f"{event} {endpoint} → {status}"
+    if event and endpoint:
+        return f"{event} {endpoint}"
+    if message:
+        return str(message)[:120]
+    return str(log)[:120]
+
+
 def detect_error_type(logs: List[dict]) -> str:
-    combined = " ".join(str(l.get("message", "")) for l in logs)
+    unwrapped = [_unwrap(l) for l in logs]
+    combined = " ".join(
+        f"{l.get('message', '')} {l.get('event', '')} {l.get('error', '')}"
+        for l in unwrapped
+    )
     for name, pattern in _PATTERNS:
         if pattern.search(combined):
             return name
@@ -20,9 +50,9 @@ def detect_error_type(logs: List[dict]) -> str:
 def extract_key_events(logs: List[dict]) -> List[str]:
     events: List[str] = []
     for log in logs:
-        msg = log.get("message") or log.get("event") or ""
-        if msg and str(msg) not in events:
-            events.append(str(msg))
+        entry = _readable(_unwrap(log))
+        if entry and entry not in events:
+            events.append(entry)
         if len(events) >= 10:
             break
     return events
