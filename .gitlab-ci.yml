@@ -6,7 +6,7 @@ stages:
 
 test:
   stage: test
-  image: python:3.10
+  image: python:3.11
   script:
     - cd sample-app
     - pip install -r requirements.txt
@@ -20,8 +20,12 @@ build:
   variables:
     DOCKER_TLS_CERTDIR: ""
   script:
-    - cd sample-app
-    - docker build -t $DOCKER_USERNAME/sample-app:latest .
+    - docker build -t $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA sample-app/
+    - docker save $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA > image.tar
+  artifacts:
+    paths:
+      - image.tar
+    expire_in: 1 hour
 
 push:
   stage: push
@@ -30,15 +34,22 @@ push:
     - docker:dind
   variables:
     DOCKER_TLS_CERTDIR: ""
+  needs: [build]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
   script:
-    - cd sample-app
-    - docker build -t $DOCKER_USERNAME/sample-app:latest .
+    - docker load < image.tar
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+    - docker tag $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA $DOCKER_USERNAME/sample-app:latest
+    - docker push $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA
     - docker push $DOCKER_USERNAME/sample-app:latest
 
 deploy:
   stage: deploy
-  when: manual
+  image: alpine:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
   script:
-    - echo "To deploy locally, run:"
+    - echo "To deploy, run:"
     - echo "cd ansible && ansible-playbook -i inventory.ini deploy.yml"

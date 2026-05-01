@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import sys
 from datetime import datetime, timezone
 
@@ -13,25 +12,16 @@ class _JsonFormatter(logging.Formatter):
             data = {"message": record.getMessage()}
         data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         data.setdefault("level", record.levelname)
+        data.setdefault("service", "agent-backend")
         return json.dumps(data)
 
 
-def get_logger():
-    logger = logging.getLogger("app")
+def get_logger(name: str = "agent") -> logging.Logger:
+    logger = logging.getLogger(name)
     if logger.hasHandlers():
         return logger
-
     logger.setLevel(logging.INFO)
-    fmt = _JsonFormatter()
-
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setFormatter(fmt)
-    logger.addHandler(stdout_handler)
-
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    file_handler = logging.FileHandler(os.path.join(log_dir, "app.log"))
-    file_handler.setFormatter(fmt)
-    logger.addHandler(file_handler)
-
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(_JsonFormatter())
+    logger.addHandler(handler)
     return logger
