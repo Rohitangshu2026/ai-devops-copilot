@@ -38,8 +38,8 @@ push:
   variables:
     DOCKER_TLS_CERTDIR: ""
   needs: [build]
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
   script:
     - docker load < image.tar
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
@@ -50,9 +50,9 @@ push:
 deploy:
   stage: deploy
   image: alpine:latest
-  when: manual
-  only:
-    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
   script:
     - echo "To deploy, run:"
     - echo "cd ansible && ansible-playbook -i inventory.ini deploy.yml"
