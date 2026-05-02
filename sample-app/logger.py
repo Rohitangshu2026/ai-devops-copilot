@@ -13,6 +13,7 @@ class _JsonFormatter(logging.Formatter):
             data = {"message": record.getMessage()}
         data.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
         data.setdefault("level", record.levelname)
+        data.setdefault("service", "sample-app")
         return json.dumps(data)
 
 

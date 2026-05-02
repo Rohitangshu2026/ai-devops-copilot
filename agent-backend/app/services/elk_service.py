@@ -19,19 +19,29 @@ def get_client() -> AsyncElasticsearch:
 
 async def fetch_logs(service: str, environment: str, lookback_minutes: int) -> List[dict]:
     client = get_client()
-    should_boosts = []
+    must_clauses: list = [{"range": {"@timestamp": {"gte": f"now-{lookback_minutes}m"}}}]
     if service:
-        should_boosts = [
-            {"term": {"service.keyword": service}},
-            {"term": {"service": service}},
-        ]
-    query = {
-        "query": {
+        must_clauses.append({
             "bool": {
-                "must": [{"range": {"@timestamp": {"gte": f"now-{lookback_minutes}m"}}}],
-                "should": should_boosts,
+                "should": [
+                    {"term": {"service.keyword": service}},
+                    {"term": {"service": service}},
+                ],
+                "minimum_should_match": 1,
             }
-        },
+        })
+    if environment:
+        must_clauses.append({
+            "bool": {
+                "should": [
+                    {"term": {"environment.keyword": environment}},
+                    {"term": {"environment": environment}},
+                ],
+                "minimum_should_match": 1,
+            }
+        })
+    query = {
+        "query": {"bool": {"must": must_clauses}},
         "sort": [{"@timestamp": {"order": "desc"}}],
         "size": 200,
     }
