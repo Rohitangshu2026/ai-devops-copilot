@@ -27,7 +27,8 @@ class ParsedLog(BaseModel):
 class AnalysisResult(BaseModel):
     service: str
     environment: str
-    root_cause: str
+    root_cause: str                          # alias for root_causes[0].cause
+    root_causes: List[Dict[str, Any]]        # ranked hypotheses with confidence
     suggestion: str
     confidence_hint: str
     confidence_score: int
@@ -36,3 +37,5 @@ class AnalysisResult(BaseModel):
     raw_evidence: List[str]
     log_summary: Dict[str, Any]
     proposed_action: Optional[Dict[str, Any]] = None
+    causality_verified: bool = False
+    causality_target: Optional[str] = None  # may differ from service if redirected
