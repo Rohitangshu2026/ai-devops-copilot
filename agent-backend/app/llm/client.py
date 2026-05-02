@@ -6,7 +6,7 @@ from anthropic import AsyncAnthropic
 
 from app.core.evaluator import validate_response
 from app.llm.prompt import SYSTEM_PROMPT, build_user_prompt
-from app.llm.tools import TOOLS, execute_tool, get_gemini_tools
+from app.llm.tools import OPENAI_TOOLS, TOOLS, execute_tool, get_gemini_tools
 from app.log_processor.summarizer import LogSummary
 from app.utils.config import settings
 from app.utils.logger import get_logger
@@ -18,14 +18,36 @@ _MAX_TOOL_ROUNDS = 3
 _LLM_TIMEOUT     = 30.0   # seconds per individual API call
 
 
-# ── Model chain ───────────────────────────────────────────────────────────────
+# ── Provider helpers ──────────────────────────────────────────────────────────
 
-def _api_key_for(model_name: str) -> str:
-    """Return the right API key for a given model, falling back to the generic key."""
+def _provider(model_name: str) -> str:
+    """Classify a model name as 'google', 'openai', or 'anthropic'."""
     if model_name.startswith(("gemini", "gemma")):
-        return settings.google_api_key or settings.llm_api_key
-    return settings.anthropic_api_key or settings.llm_api_key
+        return "google"
+    if model_name.startswith(("gpt-", "o1-", "o3-", "o4-")):
+        return "openai"
+    return "anthropic"
 
+
+def _keys_for(model_name: str) -> list[str]:
+    """
+    Return the ordered list of API keys to try for a model.
+    Keys are rotated on rate-limit within a model before falling back to the
+    next model in the chain.  The generic LLM_API_KEY is the last resort.
+    """
+    provider = _provider(model_name)
+    if provider == "google":
+        raw = settings.google_api_keys
+    elif provider == "openai":
+        raw = settings.openai_api_keys
+    else:
+        raw = settings.anthropic_api_keys
+
+    keys = [k.strip() for k in raw.split(",") if k.strip()] if raw else []
+    return keys or [settings.llm_api_key]
+
+
+# ── Model chain ───────────────────────────────────────────────────────────────
 
 def _model_chain() -> list[str]:
     """Primary model first, then any comma-separated fallbacks from settings."""
@@ -40,7 +62,7 @@ def _model_chain() -> list[str]:
 
 
 def _is_retriable(exc: Exception) -> bool:
-    """True for rate-limit / quota-exhausted errors that warrant trying the next model."""
+    """True for rate-limit / quota-exhausted errors that warrant trying the next key/model."""
     msg = str(exc).lower()
     if any(k in msg for k in ("rate limit", "quota", "too many requests", "429", "resource exhausted")):
         return True
@@ -58,6 +80,13 @@ def _is_retriable(exc: Exception) -> bool:
             return True
     except ImportError:
         pass
+    # OpenAI typed error
+    try:
+        from openai import RateLimitError as OpenAIRateLimitError
+        if isinstance(exc, OpenAIRateLimitError):
+            return True
+    except ImportError:
+        pass
     return False
 
 
@@ -72,40 +101,57 @@ async def analyze(
     summary: LogSummary,
     lookback_minutes: int = 30,
 ) -> dict:
+    """
+    Try each model in the chain.  For each model, rotate through its API keys
+    on retriable errors before moving on to the next model.
+    """
     chain = _model_chain()
     last_exc: Exception | None = None
 
     for model_name in chain:
-        try:
-            result = await _analyze_with_model(
-                model_name, service, environment, error_type,
-                severity, key_events, summary, lookback_minutes,
-            )
-            logger.info({
-                "message": "llm_response_received",
-                "service": service,
-                "model": model_name,
-            })
-            return result
-        except Exception as exc:
-            if _is_retriable(exc) and model_name != chain[-1]:
-                next_model = chain[chain.index(model_name) + 1]
-                logger.warning({
-                    "message": "model_fallback",
-                    "from":    model_name,
-                    "to":      next_model,
-                    "reason":  str(exc),
+        keys = _keys_for(model_name)
+        for i, api_key in enumerate(keys):
+            try:
+                result = await _analyze_with_model(
+                    model_name, api_key,
+                    service, environment, error_type,
+                    severity, key_events, summary, lookback_minutes,
+                )
+                logger.info({
+                    "message": "llm_response_received",
+                    "service": service,
+                    "model":   model_name,
                 })
+                return result
+            except Exception as exc:
+                if not _is_retriable(exc):
+                    raise
                 last_exc = exc
-                continue
-            raise
+                if i < len(keys) - 1:
+                    logger.warning({
+                        "message":   "key_rotation",
+                        "model":     model_name,
+                        "key_index": i,
+                        "reason":    str(exc),
+                    })
+                # else: all keys for this model exhausted — fall through to model fallback
 
-    # Should not be reached, but satisfy type checker
+        # All keys for this model are exhausted
+        if model_name != chain[-1]:
+            next_model = chain[chain.index(model_name) + 1]
+            logger.warning({
+                "message": "model_fallback",
+                "from":    model_name,
+                "to":      next_model,
+                "reason":  str(last_exc),
+            })
+
     raise last_exc  # type: ignore[misc]
 
 
 async def _analyze_with_model(
     model_name: str,
+    api_key: str,
     service: str,
     environment: str,
     error_type: str,
@@ -114,7 +160,7 @@ async def _analyze_with_model(
     summary: LogSummary,
     lookback_minutes: int,
 ) -> dict:
-    """Run the two-attempt validate-or-retry loop for a single model."""
+    """Run the two-attempt validate-or-retry loop for a single model + key."""
     result: dict = {}
     valid = False
     reason = ""
@@ -124,10 +170,13 @@ async def _analyze_with_model(
             service, environment, error_type, severity, key_events, summary,
             strict=(attempt > 0),
         )
-        if model_name.startswith(("gemini", "gemma")):
-            result = await _call_gemini(content, service, lookback_minutes, model_name)
+        provider = _provider(model_name)
+        if provider == "google":
+            result = await _call_gemini(content, service, lookback_minutes, model_name, api_key)
+        elif provider == "openai":
+            result = await _call_openai(content, service, lookback_minutes, model_name, api_key)
         else:
-            result = await _call_anthropic(content, service, lookback_minutes, model_name)
+            result = await _call_anthropic(content, service, lookback_minutes, model_name, api_key)
 
         result = _guard_llm_result(result, key_events)
         valid, reason = validate_response(result)
@@ -152,12 +201,17 @@ async def _analyze_with_model(
 # ── Gemini / Gemma agentic loop ───────────────────────────────────────────────
 
 async def _call_gemini(
-    user_content: str, service: str, lookback_minutes: int, model_name: str | None = None
+    user_content: str,
+    service: str,
+    lookback_minutes: int,
+    model_name: str | None = None,
+    api_key: str | None = None,
 ) -> dict:
     import google.generativeai as genai
 
     name = model_name or settings.llm_model
-    genai.configure(api_key=_api_key_for(name))
+    key  = api_key or _keys_for(name)[0]
+    genai.configure(api_key=key)
     model    = genai.GenerativeModel(
         model_name=name,
         system_instruction=SYSTEM_PROMPT,
@@ -195,10 +249,15 @@ async def _call_gemini(
 # ── Anthropic agentic loop ────────────────────────────────────────────────────
 
 async def _call_anthropic(
-    user_content: str, service: str, lookback_minutes: int, model_name: str | None = None
+    user_content: str,
+    service: str,
+    lookback_minutes: int,
+    model_name: str | None = None,
+    api_key: str | None = None,
 ) -> dict:
     name     = model_name or settings.llm_model
-    client   = AsyncAnthropic(api_key=_api_key_for(name))
+    key      = api_key or _keys_for(name)[0]
+    client   = AsyncAnthropic(api_key=key)
     messages = [{"role": "user", "content": user_content}]
     response = None
 
@@ -248,6 +307,80 @@ async def _call_anthropic(
         text_block = next((b for b in response.content if b.type == "text"), None)
         if text_block:
             return _parse_json(text_block.text)
+    return {}
+
+
+# ── OpenAI agentic loop ───────────────────────────────────────────────────────
+
+async def _call_openai(
+    user_content: str,
+    service: str,
+    lookback_minutes: int,
+    model_name: str | None = None,
+    api_key: str | None = None,
+) -> dict:
+    from openai import AsyncOpenAI
+
+    name   = model_name or settings.llm_model
+    key    = api_key or _keys_for(name)[0]
+    client = AsyncOpenAI(api_key=key)
+    messages: list[dict] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_content},
+    ]
+    response = None
+
+    for _ in range(_MAX_TOOL_ROUNDS):
+        response = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=name,
+                max_tokens=_MAX_TOKENS,
+                messages=messages,
+                tools=OPENAI_TOOLS,
+                tool_choice="auto",
+            ),
+            timeout=_LLM_TIMEOUT,
+        )
+
+        choice = response.choices[0]
+        if choice.finish_reason != "tool_calls" or not choice.message.tool_calls:
+            return _parse_json(choice.message.content or "{}")
+
+        # Serialize the assistant turn as a plain dict (avoids SDK object in messages list)
+        messages.append({
+            "role":       "assistant",
+            "content":    choice.message.content,
+            "tool_calls": [
+                {
+                    "id":       tc.id,
+                    "type":     "function",
+                    "function": {
+                        "name":      tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in choice.message.tool_calls
+            ],
+        })
+
+        for tc in choice.message.tool_calls:
+            output = await execute_tool(
+                tc.function.name,
+                json.loads(tc.function.arguments),
+                service,
+                lookback_minutes,
+            )
+            logger.info({"message": "tool_executed", "tool": tc.function.name, "service": service})
+            messages.append({
+                "role":         "tool",
+                "tool_call_id": tc.id,
+                "content":      output,
+            })
+
+    if response:
+        last = response.choices[0].message.content
+        if last:
+            return _parse_json(last)
     return {}
 
 

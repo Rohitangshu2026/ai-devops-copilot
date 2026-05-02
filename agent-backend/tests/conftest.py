@@ -9,8 +9,9 @@ import pytest
 # pydantic-settings can construct the Settings object in a CI environment
 # that has no .env file.
 os.environ.setdefault("LLM_API_KEY", "test-key")
-os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
+os.environ.setdefault("GOOGLE_API_KEYS", "test-google-key-1,test-google-key-2")
+os.environ.setdefault("ANTHROPIC_API_KEYS", "test-anthropic-key-1,test-anthropic-key-2")
+os.environ.setdefault("OPENAI_API_KEYS", "test-openai-key-1,test-openai-key-2")
 os.environ.setdefault("ES_URL", "http://localhost:9200")
 os.environ.setdefault("LLM_MODEL", "gemma-4-31b-it")
 

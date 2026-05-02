@@ -5,11 +5,13 @@ class Settings(BaseSettings):
     es_url: str = "http://localhost:9200"
     es_index: str = "devops-logs-*"
 
-    # Provider-specific API keys.  Set the key for each provider you use.
-    # The generic LLM_API_KEY is used as a fallback if a provider key is absent.
-    llm_api_key: str           # required generic fallback
-    google_api_key: str = ""   # Google AI (gemini-*, gemma-*)
-    anthropic_api_key: str = ""  # Anthropic (claude-*)
+    # Provider-specific API keys — comma-separated, rotated on rate-limit.
+    # Set at least one key per provider you use.
+    # The generic LLM_API_KEY is the last-resort fallback when no provider key is set.
+    llm_api_key: str              # required generic fallback
+    google_api_keys: str = ""     # Google AI (gemini-*, gemma-*)  e.g. "key1,key2"
+    anthropic_api_keys: str = ""  # Anthropic (claude-*)           e.g. "key1,key2"
+    openai_api_keys: str = ""     # OpenAI   (gpt-*, o1-*, o3-*, o4-*)
 
     llm_model: str = "gemma-4-31b-it"
     # Comma-separated fallback models tried in order when the primary is

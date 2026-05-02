@@ -55,6 +55,21 @@ TOOLS: list[dict] = [
 ]
 
 
+# ── OpenAI tool schema (wraps TOOLS in OpenAI's function-calling envelope) ────
+
+OPENAI_TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name":        t["name"],
+            "description": t["description"],
+            "parameters":  t["input_schema"],
+        },
+    }
+    for t in TOOLS
+]
+
+
 # ── Gemini tool schema (built lazily to avoid slow import at startup) ─────────
 
 _GEMINI_TOOLS_CACHE = None

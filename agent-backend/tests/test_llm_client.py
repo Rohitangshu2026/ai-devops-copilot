@@ -6,7 +6,7 @@ import pytest
 
 from app.llm.client import (
     _parse_json, _guard_llm_result, analyze, _call_anthropic, _call_gemini,
-    _model_chain, _is_retriable, _api_key_for,
+    _call_openai, _model_chain, _is_retriable, _keys_for, _provider,
 )
 from app.log_processor.summarizer import LogSummary
 
@@ -464,36 +464,83 @@ def test_model_chain_deduplicates_primary(monkeypatch):
     assert chain.count("gemma-4-31b-it") == 1
 
 
-# ── _api_key_for ─────────────────────────────────────────────────────────────
+# ── _provider ─────────────────────────────────────────────────────────────────
 
-def test_api_key_for_gemma_uses_google_key(monkeypatch):
-    monkeypatch.setattr("app.llm.client.settings.google_api_key", "goog-123")
-    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
-    assert _api_key_for("gemma-4-31b-it") == "goog-123"
+def test_provider_gemma():
+    assert _provider("gemma-4-31b-it") == "google"
 
 
-def test_api_key_for_gemini_uses_google_key(monkeypatch):
-    monkeypatch.setattr("app.llm.client.settings.google_api_key", "goog-123")
-    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
-    assert _api_key_for("gemini-2.0-flash") == "goog-123"
+def test_provider_gemini():
+    assert _provider("gemini-2.0-flash") == "google"
 
 
-def test_api_key_for_claude_uses_anthropic_key(monkeypatch):
-    monkeypatch.setattr("app.llm.client.settings.anthropic_api_key", "ant-456")
-    monkeypatch.setattr("app.llm.client.settings.llm_api_key",       "generic")
-    assert _api_key_for("claude-haiku-4-5-20251001") == "ant-456"
+def test_provider_claude():
+    assert _provider("claude-haiku-4-5-20251001") == "anthropic"
 
 
-def test_api_key_for_google_falls_back_to_generic(monkeypatch):
-    monkeypatch.setattr("app.llm.client.settings.google_api_key", "")
-    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
-    assert _api_key_for("gemma-4-31b-it") == "generic"
+def test_provider_gpt():
+    assert _provider("gpt-4o") == "openai"
 
 
-def test_api_key_for_anthropic_falls_back_to_generic(monkeypatch):
-    monkeypatch.setattr("app.llm.client.settings.anthropic_api_key", "")
-    monkeypatch.setattr("app.llm.client.settings.llm_api_key",       "generic")
-    assert _api_key_for("claude-sonnet-4-6") == "generic"
+def test_provider_o1():
+    assert _provider("o1-preview") == "openai"
+
+
+def test_provider_o3():
+    assert _provider("o3-mini") == "openai"
+
+
+def test_provider_o4():
+    assert _provider("o4-mini") == "openai"
+
+
+# ── _keys_for ─────────────────────────────────────────────────────────────────
+
+def test_keys_for_gemma_returns_google_keys(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "goog-1,goog-2")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",     "generic")
+    assert _keys_for("gemma-4-31b-it") == ["goog-1", "goog-2"]
+
+
+def test_keys_for_gemini_returns_google_keys(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "goog-1")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",     "generic")
+    assert _keys_for("gemini-2.0-flash") == ["goog-1"]
+
+
+def test_keys_for_claude_returns_anthropic_keys(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.anthropic_api_keys", "ant-1,ant-2")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",        "generic")
+    assert _keys_for("claude-haiku-4-5-20251001") == ["ant-1", "ant-2"]
+
+
+def test_keys_for_openai_returns_openai_keys(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.openai_api_keys", "oai-1,oai-2")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",     "generic")
+    assert _keys_for("gpt-4o") == ["oai-1", "oai-2"]
+
+
+def test_keys_for_google_falls_back_to_generic(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",     "generic")
+    assert _keys_for("gemma-4-31b-it") == ["generic"]
+
+
+def test_keys_for_anthropic_falls_back_to_generic(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.anthropic_api_keys", "")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",        "generic")
+    assert _keys_for("claude-sonnet-4-6") == ["generic"]
+
+
+def test_keys_for_openai_falls_back_to_generic(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.openai_api_keys", "")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",     "generic")
+    assert _keys_for("gpt-4o-mini") == ["generic"]
+
+
+def test_keys_for_strips_whitespace(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", " goog-1 , goog-2 ")
+    assert _keys_for("gemma-4-31b-it") == ["goog-1", "goog-2"]
 
 
 def test_is_retriable_rate_limit_string():
@@ -517,11 +564,13 @@ def test_is_retriable_timeout():
 
 
 async def test_analyze_falls_back_on_rate_limit(monkeypatch, mock_llm):
-    """Primary model raises a rate-limit error → fallback model is called."""
+    """Primary model (all keys) raises rate-limit → fallback model is called."""
     monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
     monkeypatch.setattr(
         "app.llm.client.settings.llm_model_fallback", "claude-haiku-4-5-20251001"
     )
+    # Use a single key so gemini is called exactly once before model fallback
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "single-key")
     mock_llm.gemini.side_effect   = Exception("429 rate limit exceeded")
     mock_llm.anthropic.return_value = dict(LLM_DEFAULT_RESULT)
 
@@ -550,3 +599,178 @@ async def test_analyze_does_not_fallback_on_non_retriable_error(monkeypatch, moc
         )
 
     mock_llm.anthropic.assert_not_awaited()
+
+
+# ── Key rotation tests ────────────────────────────────────────────────────────
+
+async def test_key_rotation_second_key_succeeds(monkeypatch, mock_llm):
+    """First key raises rate-limit; second key of the same model succeeds."""
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr("app.llm.client.settings.llm_model_fallback", "")
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "key-1,key-2")
+
+    # First call raises rate-limit, second returns valid result
+    mock_llm.gemini.side_effect = [
+        Exception("429 rate limit exceeded"),
+        dict(LLM_DEFAULT_RESULT),
+    ]
+
+    result = await analyze(
+        service="sample-app", environment="dev", error_type="runtime_crash",
+        severity="high", key_events=["OOM"], summary=_SUMMARY,
+    )
+
+    assert mock_llm.gemini.await_count == 2
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_key_rotation_all_keys_exhausted_falls_back_to_next_model(monkeypatch, mock_llm):
+    """All keys for primary model exhausted → fallback model is tried."""
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr(
+        "app.llm.client.settings.llm_model_fallback", "claude-haiku-4-5-20251001"
+    )
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "key-1,key-2")
+
+    # Both gemini calls fail with rate-limit
+    mock_llm.gemini.side_effect = Exception("429 rate limit exceeded")
+    mock_llm.anthropic.return_value = dict(LLM_DEFAULT_RESULT)
+
+    result = await analyze(
+        service="sample-app", environment="dev", error_type="runtime_crash",
+        severity="high", key_events=["OOM"], summary=_SUMMARY,
+    )
+
+    assert mock_llm.gemini.await_count == 2   # both keys tried
+    mock_llm.anthropic.assert_awaited_once()
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_key_rotation_non_retriable_does_not_rotate(monkeypatch, mock_llm):
+    """Non-retriable error skips key rotation and propagates immediately."""
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr("app.llm.client.settings.google_api_keys", "key-1,key-2")
+
+    mock_llm.gemini.side_effect = RuntimeError("internal server error")
+
+    with pytest.raises(RuntimeError, match="internal server error"):
+        await analyze(
+            service="sample-app", environment="dev", error_type="runtime_crash",
+            severity="high", key_events=["OOM"], summary=_SUMMARY,
+        )
+
+    assert mock_llm.gemini.await_count == 1   # stopped after first key
+
+
+# ── _call_openai ──────────────────────────────────────────────────────────────
+
+def _make_openai_response(content: str | None, tool_calls=None, finish_reason: str = "stop"):
+    """Build a minimal fake openai ChatCompletion response."""
+    import types
+    tc_obj = None
+    if tool_calls:
+        tc_list = []
+        for tc_id, name, args in tool_calls:
+            fn = types.SimpleNamespace(name=name, arguments=json.dumps(args))
+            tc_list.append(types.SimpleNamespace(id=tc_id, type="function", function=fn))
+        tc_obj = tc_list
+
+    message = MagicMock()
+    message.content = content
+    message.tool_calls = tc_obj
+
+    choice = MagicMock()
+    choice.message = message
+    choice.finish_reason = "tool_calls" if tc_obj else finish_reason
+
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_call_openai_no_tool_use():
+    """Direct JSON answer — no tool calls."""
+    payload = json.dumps(LLM_DEFAULT_RESULT)
+    fake_response = _make_openai_response(payload)
+
+    mock_create = AsyncMock(return_value=fake_response)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    with patch("openai.AsyncOpenAI", return_value=mock_client):
+        result = await _call_openai("analyze this", "svc", 30, "gpt-4o-mini", "key-x")
+
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+    mock_create.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_call_openai_single_tool_round():
+    """One tool call then a final answer."""
+    tool_resp = _make_openai_response(
+        None,
+        tool_calls=[("tc_1", "search_logs", {"query": "connection refused"})],
+    )
+    final_resp = _make_openai_response(json.dumps(LLM_DEFAULT_RESULT))
+
+    mock_create = AsyncMock(side_effect=[tool_resp, final_resp])
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    with (
+        patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="3 errors") as mock_tool,
+    ):
+        result = await _call_openai("analyze this", "svc", 30, "gpt-4o-mini", "key-x")
+
+    assert mock_create.await_count == 2
+    mock_tool.assert_awaited_once_with("search_logs", {"query": "connection refused"}, "svc", 30)
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+@pytest.mark.asyncio
+async def test_call_openai_respects_max_tool_rounds():
+    """Capped at _MAX_TOOL_ROUNDS even if model keeps requesting tools."""
+    from app.llm.client import _MAX_TOOL_ROUNDS
+
+    tool_resp = _make_openai_response(
+        None,
+        tool_calls=[("tc_1", "get_error_frequency", {})],
+    )
+    # All responses are tool-use so the loop hits the cap
+    responses = [tool_resp] * (_MAX_TOOL_ROUNDS + 1)
+
+    mock_create = AsyncMock(side_effect=responses)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    with (
+        patch("openai.AsyncOpenAI", return_value=mock_client),
+        patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="freq data"),
+    ):
+        result = await _call_openai("analyze this", "svc", 30, "gpt-4o-mini", "key-x")
+
+    assert mock_create.await_count == _MAX_TOOL_ROUNDS
+    assert result == {}   # no text content in final response
+
+
+@pytest.mark.asyncio
+async def test_call_openai_uses_openai_tools_schema():
+    """Verify OPENAI_TOOLS (function-calling envelope) is passed, not TOOLS."""
+    from app.llm.tools import OPENAI_TOOLS
+
+    payload = json.dumps(LLM_DEFAULT_RESULT)
+    fake_response = _make_openai_response(payload)
+
+    mock_create = AsyncMock(return_value=fake_response)
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = mock_create
+
+    with patch("openai.AsyncOpenAI", return_value=mock_client):
+        await _call_openai("analyze this", "svc", 30, "gpt-4o-mini", "key-x")
+
+    _, kwargs = mock_create.call_args
+    assert kwargs["tools"] == OPENAI_TOOLS
+    assert kwargs["tools"][0]["type"] == "function"
+    assert "name" in kwargs["tools"][0]["function"]

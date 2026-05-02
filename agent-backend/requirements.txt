@@ -4,6 +4,7 @@ pydantic==2.7.1
 pydantic-settings==2.2.1
 anthropic==0.26.1
 google-generativeai==0.7.2
+openai>=1.0.0
 elasticsearch[async]==8.12.1
 python-dotenv==1.0.1
 pytest==8.2.0
