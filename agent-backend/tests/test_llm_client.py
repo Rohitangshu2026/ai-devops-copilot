@@ -1,9 +1,13 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.llm.client import _parse_json, _guard_llm_result, analyze, _call_anthropic
+from app.llm.client import (
+    _parse_json, _guard_llm_result, analyze, _call_anthropic, _call_gemini,
+    _model_chain, _is_retriable,
+)
 from app.log_processor.summarizer import LogSummary
 
 from tests.conftest import (
@@ -11,6 +15,7 @@ from tests.conftest import (
     FakeAnthropicResponse,
     FakeTextBlock,
     FakeToolUseBlock,
+    FakeGeminiResponse,
 )
 
 
@@ -349,3 +354,167 @@ async def test_analyze_forces_no_action_after_two_invalid_responses(mock_llm):
         severity="low", key_events=["health_check /health → 200"], summary=_SUMMARY,
     )
     assert result["proposed_action"]["type"] == "no_action"
+
+
+# ── _call_gemini agentic loop (production path) ───────────────────────────────
+#
+# These test the Gemini path since that's what runs in production
+# (LLM_MODEL=gemma-4-31b-it).  We mock asyncio.to_thread so the sync
+# chat.send_message call runs inline, and mock google.generativeai to avoid
+# any real network calls.
+
+def _make_gemini_mock(responses: list):
+    """
+    Return (mock_genai, mock_chat) where chat.send_message cycles through responses.
+    Patches google.generativeai.GenerativeModel and configure.
+    """
+    mock_chat  = MagicMock()
+    mock_chat.send_message.side_effect = responses
+    mock_model = MagicMock()
+    mock_model.start_chat.return_value = mock_chat
+    mock_genai = MagicMock()
+    mock_genai.GenerativeModel.return_value = mock_model
+    return mock_genai, mock_chat
+
+
+async def _run_call_gemini(mock_genai, user_content="prompt", service="sample-app", lm=30):
+    """Helper: patch genai + asyncio.to_thread and run _call_gemini."""
+    async def fake_to_thread(fn, *args):
+        return fn(*args)
+
+    with patch.dict("sys.modules", {"google.generativeai": mock_genai}):
+        with patch.object(asyncio, "to_thread", side_effect=fake_to_thread):
+            # Also patch get_gemini_tools so it doesn't try to build real protos
+            with patch("app.llm.client.get_gemini_tools", return_value=MagicMock()):
+                return await _call_gemini(user_content, service, lm)
+
+
+async def test_gemini_single_round_no_tool_use():
+    """Response has no function_call parts — loop exits immediately."""
+    response = FakeGeminiResponse(text=json.dumps(LLM_DEFAULT_RESULT))
+    mock_genai, mock_chat = _make_gemini_mock([response])
+
+    result = await _run_call_gemini(mock_genai)
+
+    assert mock_chat.send_message.call_count == 1
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_gemini_one_tool_round_then_answer():
+    """First response triggers a tool call; second response is the final answer."""
+    tool_response  = FakeGeminiResponse(function_calls=[("search_logs", {"query": "error"})])
+    final_response = FakeGeminiResponse(text=json.dumps(LLM_DEFAULT_RESULT))
+    mock_genai, mock_chat = _make_gemini_mock([tool_response, final_response])
+
+    with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="5 errors found"):
+        result = await _run_call_gemini(mock_genai)
+
+    assert mock_chat.send_message.call_count == 2
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_gemini_tool_execute_called_with_correct_args():
+    """execute_tool receives the function call name and args from the Gemini response."""
+    tool_response  = FakeGeminiResponse(function_calls=[("get_error_frequency", {"lookback_minutes": 10})])
+    final_response = FakeGeminiResponse(text=json.dumps(LLM_DEFAULT_RESULT))
+    mock_genai, _ = _make_gemini_mock([tool_response, final_response])
+
+    with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="freq result") as mock_exec:
+        await _run_call_gemini(mock_genai, service="sample-app", lm=30)
+
+    mock_exec.assert_awaited_once_with("get_error_frequency", {"lookback_minutes": 10}, "sample-app", 30)
+
+
+async def test_gemini_respects_max_tool_rounds():
+    """Loop stops after _MAX_TOOL_ROUNDS even if every response has function calls."""
+    from app.llm.client import _MAX_TOOL_ROUNDS
+
+    tool_response = FakeGeminiResponse(function_calls=[("search_logs", {"query": "x"})])
+    responses     = [tool_response] * (_MAX_TOOL_ROUNDS + 5)
+    mock_genai, mock_chat = _make_gemini_mock(responses)
+
+    with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="ok"):
+        await _run_call_gemini(mock_genai)
+
+    # 1 initial call + _MAX_TOOL_ROUNDS follow-up calls (one per tool round)
+    assert mock_chat.send_message.call_count == _MAX_TOOL_ROUNDS + 1
+
+
+# ── Model chain and fallback ──────────────────────────────────────────────────
+
+def test_model_chain_primary_only(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr("app.llm.client.settings.llm_model_fallback", "")
+    assert _model_chain() == ["gemma-4-31b-it"]
+
+
+def test_model_chain_with_fallbacks(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr("app.llm.client.settings.llm_model_fallback", "claude-haiku-4-5-20251001, gemini-2.0-flash")
+    chain = _model_chain()
+    assert chain[0] == "gemma-4-31b-it"
+    assert "claude-haiku-4-5-20251001" in chain
+    assert "gemini-2.0-flash" in chain
+
+
+def test_model_chain_deduplicates_primary(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr("app.llm.client.settings.llm_model_fallback", "gemma-4-31b-it,claude-haiku-4-5-20251001")
+    chain = _model_chain()
+    assert chain.count("gemma-4-31b-it") == 1
+
+
+def test_is_retriable_rate_limit_string():
+    assert _is_retriable(Exception("429 rate limit exceeded")) is True
+
+
+def test_is_retriable_quota_string():
+    assert _is_retriable(Exception("quota exhausted for project")) is True
+
+
+def test_is_retriable_resource_exhausted_string():
+    assert _is_retriable(Exception("Resource exhausted")) is True
+
+
+def test_is_retriable_regular_error():
+    assert _is_retriable(ValueError("connection refused")) is False
+
+
+def test_is_retriable_timeout():
+    assert _is_retriable(asyncio.TimeoutError()) is False
+
+
+async def test_analyze_falls_back_on_rate_limit(monkeypatch, mock_llm):
+    """Primary model raises a rate-limit error → fallback model is called."""
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr(
+        "app.llm.client.settings.llm_model_fallback", "claude-haiku-4-5-20251001"
+    )
+    mock_llm.gemini.side_effect   = Exception("429 rate limit exceeded")
+    mock_llm.anthropic.return_value = dict(LLM_DEFAULT_RESULT)
+
+    result = await analyze(
+        service="sample-app", environment="dev", error_type="dependency_error",
+        severity="high", key_events=["GET /error → 500"], summary=_SUMMARY,
+    )
+
+    mock_llm.gemini.assert_awaited_once()
+    mock_llm.anthropic.assert_awaited_once()
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_analyze_does_not_fallback_on_non_retriable_error(monkeypatch, mock_llm):
+    """Non-rate-limit error from primary → exception propagates, fallback NOT tried."""
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    monkeypatch.setattr(
+        "app.llm.client.settings.llm_model_fallback", "claude-haiku-4-5-20251001"
+    )
+    mock_llm.gemini.side_effect = RuntimeError("elasticsearch is down")
+
+    with pytest.raises(RuntimeError, match="elasticsearch is down"):
+        await analyze(
+            service="sample-app", environment="dev", error_type="dependency_error",
+            severity="high", key_events=["GET /error → 500"], summary=_SUMMARY,
+        )
+
+    mock_llm.anthropic.assert_not_awaited()

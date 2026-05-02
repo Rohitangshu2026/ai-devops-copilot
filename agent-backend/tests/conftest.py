@@ -111,3 +111,51 @@ class FakeAnthropicResponse:
     def __init__(self, stop_reason: str, content: list):
         self.stop_reason = stop_reason
         self.content = content
+
+
+# ── Fake Google Generative AI objects for _call_gemini loop tests ─────────────
+#
+# _call_gemini checks:
+#   fn_calls = [part.function_call for part in response.parts
+#               if hasattr(part, "function_call") and part.function_call.name]
+#
+# A FakeGeminiResponse with no function calls terminates the loop; one with
+# function_calls triggers tool execution and a follow-up send_message call.
+#
+# Example — one tool round then a final answer:
+#
+#   responses = [
+#       FakeGeminiResponse(function_calls=[("search_logs", {"query": "error"})]),
+#       FakeGeminiResponse(text=json.dumps(LLM_DEFAULT_RESULT)),
+#   ]
+#   mock_chat.send_message.side_effect = responses
+
+
+class FakeGeminiFunctionCall:
+    """Mimics a google.generativeai function call part's .function_call attribute."""
+    def __init__(self, name: str, args: dict):
+        self.name = name
+        self.args = args
+
+
+class FakeGeminiPart:
+    """Mimics a single part in a Gemini response."""
+    def __init__(self, function_call=None):
+        # Only set function_call attribute when there is one — matches
+        # the hasattr(..., "function_call") check in _call_gemini.
+        if function_call is not None:
+            self.function_call = function_call
+
+
+class FakeGeminiResponse:
+    """
+    Mimics the object returned by chat.send_message() in google.generativeai.
+    Provide text for a final answer, or function_calls for a tool-use round.
+
+    function_calls: list of (name, args_dict) tuples
+    """
+    def __init__(self, text: str = "", function_calls: list | None = None):
+        self.text = text
+        self.parts = []
+        for name, args in (function_calls or []):
+            self.parts.append(FakeGeminiPart(FakeGeminiFunctionCall(name, args)))
