@@ -20,6 +20,13 @@ _LLM_TIMEOUT     = 30.0   # seconds per individual API call
 
 # ── Model chain ───────────────────────────────────────────────────────────────
 
+def _api_key_for(model_name: str) -> str:
+    """Return the right API key for a given model, falling back to the generic key."""
+    if model_name.startswith(("gemini", "gemma")):
+        return settings.google_api_key or settings.llm_api_key
+    return settings.anthropic_api_key or settings.llm_api_key
+
+
 def _model_chain() -> list[str]:
     """Primary model first, then any comma-separated fallbacks from settings."""
     chain = [settings.llm_model]
@@ -150,7 +157,7 @@ async def _call_gemini(
     import google.generativeai as genai
 
     name = model_name or settings.llm_model
-    genai.configure(api_key=settings.llm_api_key)
+    genai.configure(api_key=_api_key_for(name))
     model    = genai.GenerativeModel(
         model_name=name,
         system_instruction=SYSTEM_PROMPT,
@@ -191,7 +198,7 @@ async def _call_anthropic(
     user_content: str, service: str, lookback_minutes: int, model_name: str | None = None
 ) -> dict:
     name     = model_name or settings.llm_model
-    client   = AsyncAnthropic(api_key=settings.llm_api_key)
+    client   = AsyncAnthropic(api_key=_api_key_for(name))
     messages = [{"role": "user", "content": user_content}]
     response = None
 

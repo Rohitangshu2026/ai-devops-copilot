@@ -6,7 +6,7 @@ import pytest
 
 from app.llm.client import (
     _parse_json, _guard_llm_result, analyze, _call_anthropic, _call_gemini,
-    _model_chain, _is_retriable,
+    _model_chain, _is_retriable, _api_key_for,
 )
 from app.log_processor.summarizer import LogSummary
 
@@ -462,6 +462,38 @@ def test_model_chain_deduplicates_primary(monkeypatch):
     monkeypatch.setattr("app.llm.client.settings.llm_model_fallback", "gemma-4-31b-it,claude-haiku-4-5-20251001")
     chain = _model_chain()
     assert chain.count("gemma-4-31b-it") == 1
+
+
+# ── _api_key_for ─────────────────────────────────────────────────────────────
+
+def test_api_key_for_gemma_uses_google_key(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_key", "goog-123")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
+    assert _api_key_for("gemma-4-31b-it") == "goog-123"
+
+
+def test_api_key_for_gemini_uses_google_key(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_key", "goog-123")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
+    assert _api_key_for("gemini-2.0-flash") == "goog-123"
+
+
+def test_api_key_for_claude_uses_anthropic_key(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.anthropic_api_key", "ant-456")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",       "generic")
+    assert _api_key_for("claude-haiku-4-5-20251001") == "ant-456"
+
+
+def test_api_key_for_google_falls_back_to_generic(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.google_api_key", "")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",    "generic")
+    assert _api_key_for("gemma-4-31b-it") == "generic"
+
+
+def test_api_key_for_anthropic_falls_back_to_generic(monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.anthropic_api_key", "")
+    monkeypatch.setattr("app.llm.client.settings.llm_api_key",       "generic")
+    assert _api_key_for("claude-sonnet-4-6") == "generic"
 
 
 def test_is_retriable_rate_limit_string():
