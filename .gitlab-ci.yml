@@ -4,11 +4,19 @@ stages:
   - push
   - deploy
 
-test:
+test-sample-app:
   stage: test
   image: python:3.11
   script:
     - cd sample-app
+    - pip install -r requirements.txt
+    - pytest
+
+test-agent-backend:
+  stage: test
+  image: python:3.11
+  script:
+    - cd agent-backend
     - pip install -r requirements.txt
     - pytest
 
