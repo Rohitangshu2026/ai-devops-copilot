@@ -1,5 +1,6 @@
 from dataclasses import asdict
 
+from app.core.causality import validate_causality
 from app.core.confidence import score_confidence
 from app.log_processor.classifier import classify_severity
 from app.log_processor.extractor import extract_relevant
@@ -42,11 +43,30 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         summary=summary,
     )
 
+    # ranked hypotheses — LLM returns root_causes array
+    root_causes: list = llm_result.get("root_causes") or []
+    if not root_causes:
+        # fallback: wrap legacy root_cause string
+        root_causes = [{"cause": llm_result.get("root_cause", ""), "confidence": 0.5}]
+    primary_cause = root_causes[0].get("cause", "")
+
+    # causality validation against log evidence
+    causality = validate_causality(summary, primary_cause, req.service)
+    action_target = causality.action_target or req.service
+
+    if causality.target_redirected:
+        logger.info({
+            "message": "causality_target_redirected",
+            "service": req.service,
+            "redirected_to": action_target,
+        })
+
     result = AnalysisResult(
         service=req.service,
         environment=req.environment.value,
-        root_cause=llm_result["root_cause"],
-        suggestion=llm_result["suggestion"],
+        root_cause=primary_cause,
+        root_causes=root_causes,
+        suggestion=llm_result.get("suggestion", ""),
         confidence_hint=confidence_hint,
         confidence_score=confidence_score,
         confidence_source="signal",
@@ -54,11 +74,13 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             error_type=error_type,
             severity=severity,
             key_events=key_events,
-            summary=llm_result["root_cause"],
+            summary=primary_cause,
         ),
         raw_evidence=raw_evidence[:20],
         log_summary=asdict(summary),
         proposed_action=llm_result.get("proposed_action"),
+        causality_verified=causality.verified,
+        causality_target=action_target if causality.target_redirected else None,
     )
 
     logger.info({
@@ -67,5 +89,8 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         "confidence": confidence_hint,
         "score": confidence_score,
         "error_type": error_type,
+        "causality_verified": causality.verified,
+        "root_causes_count": len(root_causes),
+        "change_point": summary.change_point_description,
     })
     return result
