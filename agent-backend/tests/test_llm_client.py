@@ -1,7 +1,10 @@
 import json
 import pytest
 
-from app.llm.client import _parse_json, _guard_llm_result
+from app.llm.client import _parse_json, _guard_llm_result, analyze
+from app.log_processor.summarizer import LogSummary
+
+from tests.conftest import LLM_DEFAULT_RESULT
 
 
 # ── _parse_json ───────────────────────────────────────────────────────────────
@@ -120,3 +123,91 @@ def test_guard_fallback_confidence_set():
     guarded = _guard_llm_result(result, ["error event"])
     assert "confidence" in guarded["root_causes"][0]
     assert isinstance(guarded["root_causes"][0]["confidence"], float)
+
+
+# ── analyze() integration — uses mock_llm fixture, no real API calls ──────────
+
+_SUMMARY = LogSummary(
+    total_events=20,
+    error_count=5,
+    warning_count=1,
+    unique_endpoints=["/error"],
+    error_ratio=0.25,
+    deduplicated_events=["error /error → 500 — 5×"],
+    time_span_minutes=5.0,
+)
+
+
+async def test_analyze_returns_root_causes(mock_llm):
+    result = await analyze(
+        service="sample-app",
+        environment="dev",
+        error_type="runtime_crash",
+        severity="high",
+        key_events=["error /error → 500"],
+        summary=_SUMMARY,
+    )
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+    mock_llm.gemini.assert_awaited_once()
+
+
+async def test_analyze_calls_anthropic_for_non_gemma_model(mock_llm, monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "claude-sonnet-4-6")
+    await analyze(
+        service="sample-app",
+        environment="dev",
+        error_type="dependency_error",
+        severity="high",
+        key_events=["GET /api → 500"],
+        summary=_SUMMARY,
+    )
+    mock_llm.anthropic.assert_awaited_once()
+    mock_llm.gemini.assert_not_awaited()
+
+
+async def test_analyze_calls_gemini_for_gemma_model(mock_llm, monkeypatch):
+    monkeypatch.setattr("app.llm.client.settings.llm_model", "gemma-4-31b-it")
+    await analyze(
+        service="sample-app",
+        environment="dev",
+        error_type="runtime_crash",
+        severity="high",
+        key_events=["error /error → 500"],
+        summary=_SUMMARY,
+    )
+    mock_llm.gemini.assert_awaited_once()
+    mock_llm.anthropic.assert_not_awaited()
+
+
+async def test_analyze_guard_applied_when_backend_returns_empty_causes(mock_llm):
+    mock_llm.gemini.return_value = {"root_causes": [], "suggestion": "check logs"}
+    result = await analyze(
+        service="sample-app",
+        environment="dev",
+        error_type="unknown",
+        severity="low",
+        key_events=["health_check /health → 200"],
+        summary=_SUMMARY,
+    )
+    # _guard_llm_result must have filled in a fallback cause
+    assert len(result["root_causes"]) == 1
+    assert result["root_causes"][0]["cause"] != ""
+
+
+async def test_analyze_custom_return_value_propagates(mock_llm):
+    custom = {
+        "root_causes": [{"cause": "OOM on restart", "confidence": 0.95}],
+        "suggestion": "increase memory limit",
+        "proposed_action": {"type": "scale_up", "target": "sample-app", "reason": "oom"},
+    }
+    mock_llm.gemini.return_value = custom
+    result = await analyze(
+        service="sample-app",
+        environment="dev",
+        error_type="runtime_crash",
+        severity="critical",
+        key_events=["OOMKilled"],
+        summary=_SUMMARY,
+    )
+    assert result["root_causes"][0]["cause"] == "OOM on restart"
+    assert result["proposed_action"]["type"] == "scale_up"
