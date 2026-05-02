@@ -25,7 +25,9 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     relevant = extract_relevant(raw_logs)
-    summary = summarize(relevant)
+    # Pass raw_logs so the timeline includes all events (health checks provide
+    # time context for error_rate computation). relevant is used for error analysis.
+    summary = summarize(raw_logs)
 
     error_type = detect_error_type(relevant)
     key_events = extract_key_events(relevant)
