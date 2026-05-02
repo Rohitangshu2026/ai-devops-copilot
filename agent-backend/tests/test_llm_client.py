@@ -1,10 +1,17 @@
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from app.llm.client import _parse_json, _guard_llm_result, analyze
+from app.llm.client import _parse_json, _guard_llm_result, analyze, _call_anthropic
 from app.log_processor.summarizer import LogSummary
 
-from tests.conftest import LLM_DEFAULT_RESULT
+from tests.conftest import (
+    LLM_DEFAULT_RESULT,
+    FakeAnthropicResponse,
+    FakeTextBlock,
+    FakeToolUseBlock,
+)
 
 
 # ── _parse_json ───────────────────────────────────────────────────────────────
@@ -196,8 +203,8 @@ async def test_analyze_guard_applied_when_backend_returns_empty_causes(mock_llm)
 
 async def test_analyze_custom_return_value_propagates(mock_llm):
     custom = {
-        "root_causes": [{"cause": "OOM on restart", "confidence": 0.95}],
-        "suggestion": "increase memory limit",
+        "root_causes": [{"cause": "OOMKilled: container exceeded memory limit", "confidence": 0.95}],
+        "suggestion": "increase the memory limit in the deployment spec",
         "proposed_action": {"type": "scale_up", "target": "sample-app", "reason": "oom"},
     }
     mock_llm.gemini.return_value = custom
@@ -209,5 +216,136 @@ async def test_analyze_custom_return_value_propagates(mock_llm):
         key_events=["OOMKilled"],
         summary=_SUMMARY,
     )
-    assert result["root_causes"][0]["cause"] == "OOM on restart"
+    assert "OOMKilled" in result["root_causes"][0]["cause"]
     assert result["proposed_action"]["type"] == "scale_up"
+
+
+# ── Agentic loop — _call_anthropic ────────────────────────────────────────────
+#
+# These tests patch app.llm.client.AsyncAnthropic (the module-level import) to
+# simulate multi-turn tool-use sequences without hitting the real API.
+
+def _make_anthropic_mock(responses: list):
+    """Return a patched AsyncAnthropic whose messages.create cycles through responses."""
+    mock_client   = MagicMock()
+    mock_messages = AsyncMock(side_effect=responses)
+    mock_client.messages.create = mock_messages
+    return mock_client, mock_messages
+
+
+async def test_anthropic_single_round_no_tool_use():
+    """Direct JSON response with stop_reason=end_turn — no tools called."""
+    response = FakeAnthropicResponse(
+        stop_reason="end_turn",
+        content=[FakeTextBlock(json.dumps(LLM_DEFAULT_RESULT))],
+    )
+    mock_client, mock_messages = _make_anthropic_mock([response])
+    with patch("app.llm.client.AsyncAnthropic", return_value=mock_client):
+        result = await _call_anthropic("test prompt", "sample-app", 30)
+
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+    assert mock_messages.call_count == 1
+
+
+async def test_anthropic_one_tool_round_then_answer():
+    """stop_reason=tool_use on round 1, then end_turn on round 2."""
+    tool_response = FakeAnthropicResponse(
+        stop_reason="tool_use",
+        content=[
+            FakeTextBlock("Let me search the logs."),
+            FakeToolUseBlock("search_logs", {"query": "connection refused"}, "tu_1"),
+        ],
+    )
+    final_response = FakeAnthropicResponse(
+        stop_reason="end_turn",
+        content=[FakeTextBlock(json.dumps(LLM_DEFAULT_RESULT))],
+    )
+    mock_client, mock_messages = _make_anthropic_mock([tool_response, final_response])
+
+    with patch("app.llm.client.AsyncAnthropic", return_value=mock_client):
+        with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="found: 5 errors"):
+            result = await _call_anthropic("test prompt", "sample-app", 30)
+
+    assert mock_messages.call_count == 2
+    assert result["root_causes"][0]["cause"] == LLM_DEFAULT_RESULT["root_causes"][0]["cause"]
+
+
+async def test_anthropic_tool_result_appended_to_messages():
+    """Verify the tool result is added as a user turn before the second API call."""
+    tool_response = FakeAnthropicResponse(
+        stop_reason="tool_use",
+        content=[FakeToolUseBlock("get_error_frequency", {}, "tu_2")],
+    )
+    final_response = FakeAnthropicResponse(
+        stop_reason="end_turn",
+        content=[FakeTextBlock(json.dumps(LLM_DEFAULT_RESULT))],
+    )
+    mock_client, mock_messages = _make_anthropic_mock([tool_response, final_response])
+
+    with patch("app.llm.client.AsyncAnthropic", return_value=mock_client):
+        with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="freq: /error 10"):
+            await _call_anthropic("test", "sample-app", 30)
+
+    # Second call's messages list should include the tool_result user turn
+    second_call_messages = mock_messages.call_args_list[1][1]["messages"]
+    roles = [m["role"] for m in second_call_messages]
+    assert "assistant" in roles
+    assert roles.count("user") == 2   # original prompt + tool result
+
+
+async def test_anthropic_respects_max_tool_rounds():
+    """After _MAX_TOOL_ROUNDS tool-use responses the loop stops and returns what it has."""
+    from app.llm.client import _MAX_TOOL_ROUNDS
+
+    tool_response = FakeAnthropicResponse(
+        stop_reason="tool_use",
+        content=[FakeToolUseBlock("search_logs", {"query": "error"}, "tu_x")],
+    )
+    responses = [tool_response] * (_MAX_TOOL_ROUNDS + 5)   # more than the cap
+    mock_client, mock_messages = _make_anthropic_mock(responses)
+
+    with patch("app.llm.client.AsyncAnthropic", return_value=mock_client):
+        with patch("app.llm.client.execute_tool", new_callable=AsyncMock, return_value="ok"):
+            result = await _call_anthropic("test", "sample-app", 30)
+
+    assert mock_messages.call_count == _MAX_TOOL_ROUNDS
+    # After max rounds with no text block the result is {}; guard fills it later
+    assert isinstance(result, dict)
+
+
+# ── Evaluator integration inside analyze() ───────────────────────────────────
+
+async def test_analyze_retries_on_invalid_response(mock_llm):
+    """First call returns a malformed result; second call (strict=True) returns valid."""
+    bad_result = {
+        "root_causes": [{"cause": "x", "confidence": 0.5}],  # too short
+        "suggestion": "the service is down",                   # no verb
+        "proposed_action": {"type": "notify", "target": "svc", "reason": "r"},
+    }
+    good_result = {
+        "root_causes": [{"cause": "connection refused to elasticsearch on port 9200", "confidence": 0.9}],
+        "suggestion": "restart the elasticsearch container",
+        "proposed_action": {"type": "notify", "target": "svc", "reason": "r"},
+    }
+    mock_llm.gemini.side_effect = [bad_result, good_result]
+    result = await analyze(
+        service="sample-app", environment="dev", error_type="dependency_error",
+        severity="high", key_events=["GET /error → 500"], summary=_SUMMARY,
+    )
+    assert mock_llm.gemini.call_count == 2
+    assert result["root_causes"][0]["cause"] == good_result["root_causes"][0]["cause"]
+
+
+async def test_analyze_forces_no_action_after_two_invalid_responses(mock_llm):
+    """Both attempts return invalid responses — proposed_action.type forced to no_action."""
+    bad_result = {
+        "root_causes": [{"cause": "x", "confidence": 0.5}],
+        "suggestion": "the service is down",
+        "proposed_action": {"type": "notify", "target": "svc", "reason": "r"},
+    }
+    mock_llm.gemini.side_effect = [bad_result, bad_result]
+    result = await analyze(
+        service="sample-app", environment="dev", error_type="unknown",
+        severity="low", key_events=["health_check /health → 200"], summary=_SUMMARY,
+    )
+    assert result["proposed_action"]["type"] == "no_action"

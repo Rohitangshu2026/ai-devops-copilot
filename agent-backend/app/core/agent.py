@@ -43,6 +43,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         severity=severity,
         key_events=key_events,
         summary=summary,
+        lookback_minutes=req.lookback_minutes,
     )
 
     # ranked hypotheses — LLM returns root_causes array

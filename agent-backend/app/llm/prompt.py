@@ -50,6 +50,7 @@ def build_user_prompt(
     severity: str,
     key_events: list,
     summary: LogSummary,
+    strict: bool = False,
 ) -> str:
     summary_dict = asdict(summary)
     payload = {
@@ -61,7 +62,13 @@ def build_user_prompt(
         "log_summary": summary_dict,
     }
     events_str = "\n".join(f"- {e}" for e in key_events) if key_events else "- (none)"
+    prefix = (
+        "WARNING: Your previous response did not match the required schema. "
+        "Return ONLY valid JSON — no text, no markdown, no explanations.\n\n"
+        if strict else ""
+    )
     return (
+        f"{prefix}"
         f"Analyze this incident and return JSON.\n\n"
         f"Key events YOU MUST reference in root_causes:\n{events_str}\n\n"
         f"Full incident data:\n{json.dumps(payload, indent=2)}"
