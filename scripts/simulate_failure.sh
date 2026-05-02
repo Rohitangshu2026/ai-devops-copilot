@@ -13,8 +13,14 @@ for i in $(seq 1 5); do
   curl -sf "$BASE_URL/health" > /dev/null && echo "  GET /health  → ok"
 done
 
-# Trigger the intentional error endpoint
-curl -sf "$BASE_URL/error" > /dev/null && echo "  GET /error   → ok (simulated failure logged)"
+# Trigger the intentional error endpoint multiple times to produce
+# enough error events for change-point detection (needs ≥2 timestamps)
+echo "  Triggering error burst..."
+for i in $(seq 1 10); do
+  curl -sf "$BASE_URL/error" > /dev/null || true
+  sleep 0.3
+done
+echo "  GET /error ×10 → simulated failures logged"
 
 echo ""
 echo "Done. Verify logs reached Elasticsearch:"
