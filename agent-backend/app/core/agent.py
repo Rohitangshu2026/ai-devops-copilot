@@ -1,7 +1,14 @@
+from __future__ import annotations
+
+import uuid
 from dataclasses import asdict
 
+from app.core.audit import record_analysis
 from app.core.causality import validate_causality
 from app.core.confidence import score_confidence
+from app.core.action_executor import execute as action_execute
+from app.core.impact import schedule_verification
+from app.core.safety import validate as safety_validate
 from app.log_processor.classifier import classify_severity
 from app.log_processor.extractor import extract_relevant
 from app.log_processor.parser import detect_error_type, extract_key_events
@@ -64,6 +71,55 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             "redirected_to": action_target,
         })
 
+    # ── Phase 5: safety stack ─────────────────────────────────────────────────
+    safety = await safety_validate(
+        service=req.service,
+        environment=req.environment.value,
+        error_type=error_type,
+        severity=severity,
+        confidence=confidence_hint,
+        proposed_action=llm_result.get("proposed_action", {}),
+        causality=causality,
+    )
+
+    # Override proposed action if safety denied or modified it
+    final_action = {**llm_result.get("proposed_action", {}), "type": safety.action}
+
+    # Execute if action is not notify/no_action
+    action_id = str(uuid.uuid4())
+    execution_result = None
+    if safety.action not in ("notify", "no_action"):
+        execution_result = await action_execute(
+            action_id=action_id,
+            action_type=safety.action,
+            service=action_target,
+            dry_run=(req.environment.value == "dev"),
+        )
+        # Schedule impact verification 2 min later (fire-and-forget)
+        await schedule_verification(
+            incident_id=action_id,
+            service=req.service,
+            environment=req.environment.value,
+            baseline_error_ratio=summary.error_ratio,
+        )
+
+    # Audit log
+    incident_id = await record_analysis(
+        service=req.service,
+        environment=req.environment.value,
+        error_type=error_type,
+        severity=severity,
+        confidence_hint=confidence_hint,
+        confidence_score=confidence_score,
+        causality_verified=causality.verified,
+        causality_evidence=causality.matched_evidence,
+        root_causes=root_causes,
+        proposed_action=final_action,
+        safety_decision="allowed" if safety.allowed else "denied",
+        safety_reason=safety.reason,
+        log_summary=asdict(summary),
+    )
+
     result = AnalysisResult(
         service=req.service,
         environment=req.environment.value,
@@ -81,9 +137,14 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         ),
         raw_evidence=raw_evidence[:20],
         log_summary=asdict(summary),
-        proposed_action=llm_result.get("proposed_action"),
+        proposed_action=final_action,
         causality_verified=causality.verified,
         causality_target=action_target if causality.target_redirected else None,
+        safety_decision="allowed" if safety.allowed else "denied",
+        safety_reason=safety.reason,
+        safety_checks=safety.checks,
+        incident_id=incident_id,
+        execution_result=asdict(execution_result) if execution_result is not None else None,
     )
 
     logger.info({
@@ -95,5 +156,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         "causality_verified": causality.verified,
         "root_causes_count": len(root_causes),
         "change_point": summary.change_point_description,
+        "safety_decision": safety.action,
+        "incident_id": incident_id,
     })
     return result

@@ -39,3 +39,9 @@ class AnalysisResult(BaseModel):
     proposed_action: Optional[Dict[str, Any]] = None
     causality_verified: bool = False
     causality_target: Optional[str] = None  # may differ from service if redirected
+    # Phase 5 — safety stack fields (all optional for backward compatibility)
+    safety_decision: Optional[str] = None
+    safety_reason: Optional[str] = None
+    safety_checks: Optional[Dict[str, Any]] = None
+    incident_id: Optional[str] = None
+    execution_result: Optional[Dict[str, Any]] = None

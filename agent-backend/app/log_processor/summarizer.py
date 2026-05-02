@@ -140,11 +140,11 @@ def _detect_change_point(
     t_max: datetime,
     t_min: datetime,
 ) -> tuple[Optional[float], Optional[str]]:
-    """Slide over timeline buckets; flag where error_rate jumps > 0.5."""
+    """Slide over timeline buckets; flag where error_rate jumps > 0.2."""
     for i in range(1, len(timeline)):
         prev = timeline[i - 1]
         curr = timeline[i]
-        if curr.error_rate - prev.error_rate > 0.5:
+        if curr.error_rate - prev.error_rate > 0.2:
             total_seconds = (t_max - t_min).total_seconds()
             bucket_seconds = total_seconds / _TIMELINE_BUCKETS
             # midpoint of the transition bucket
