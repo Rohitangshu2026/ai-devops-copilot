@@ -449,6 +449,31 @@ request open. Slow scale-ups time out the caller.
 Files: `app/core/action_executor.py`, `app/api/v1/routes.py`,
 `app/models/schemas.py`
 
+#### 6g. Confidence explanation breakdown
+
+**Problem**: `"confidence": "high"` is opaque. Operators can't verify or
+dispute it — so they don't trust it.
+
+**Fix**: surface the already-computed per-signal labels as
+`confidence_breakdown` in every response. No new logic; just capture what
+`confidence.py` already accumulates internally:
+
+```json
+{
+  "confidence": "high",
+  "confidence_score": 8,
+  "confidence_breakdown": [
+    "+2 error_type=runtime_crash (known type)",
+    "+2 severity=high",
+    "+2 error_ratio=0.74 (>10%)",
+    "+1 event_count=23 (≥10)",
+    "+1 historical_match (2/3 similar incidents resolved)"
+  ]
+}
+```
+
+Files: `app/core/confidence.py`, `app/models/schemas.py`, `app/core/agent.py`
+
 ---
 
 ### Phase 7 — End-to-End Validation Against a Real Cluster
@@ -475,6 +500,22 @@ with `dry_run=True` because there is no live cluster.
 - **`tests/e2e/test_chaos.py`** — pod kill mid-poll, ES kill mid-write, 50
   concurrent analyze calls (exactly one action executes)
 
+- **Kubernetes event correlation** (`get_k8s_events` tool) — third agentic
+  tool that queries the k8s API for pod/node events. Surfaces failure modes
+  that never appear in application logs:
+
+  | k8s event | What it unlocks |
+  |---|---|
+  | `OOMKilling` | kernel-level OOM, not just app log |
+  | `FailedScheduling` | node resource exhaustion |
+  | `ImagePullBackOff` | registry / credential issues |
+  | `Evicted` | node memory/disk pressure |
+  | `SuccessfulRescale` | HPA activity correlated with load spike |
+  | `BackOff` | CrashLoopBackOff restart sequence |
+
+  Degrades gracefully (`"k8s events unavailable"`) in docker-compose mode
+  so unit tests are unaffected. Files: `app/llm/tools.py`, `requirements.txt`.
+
 ---
 
 ### Phase 8 — Observability & Memory-Aware Confidence
@@ -490,6 +531,43 @@ with `dry_run=True` because there is no live cluster.
 - **`GET /dashboard`** — server-rendered HTML table of recent 50 incidents
   with service / safety_decision / outcome filters. No SPA framework, no
   build step.
+- **Incident timeline reconstruction** (`GET /api/v1/incidents/{id}/timeline`)
+  — assembles a chronological narrative from data already stored across the
+  pipeline: change-point from log summary, LLM tool calls during the agentic
+  loop, safety gate decision, action start/completion, impact verification:
+
+  ```
+  12:01:02  error_rate_spike      — ratio jumped 0% → 74% (change_point)
+  12:01:15  analysis_started      — confidence=high, error_type=runtime_crash
+  12:01:18  tool_call             — search_logs('OOMKilled') → 3 hits
+  12:01:20  tool_call             — get_k8s_events(default) → BackOff ×4
+  12:01:22  safety_approved       — all gates passed, dry-run diff: +0/-0
+  12:01:24  action_started        — restart_pod sample-app
+  12:02:03  pod_ready             — 1/1 replicas Ready
+  12:03:05  impact_verified       — error_ratio 0.74 → 0.02 → resolved
+  12:03:05  mttr                  — 123 seconds
+  ```
+
+  Requires storing agentic loop tool calls in the incident doc (one new
+  field in `_analyze_with_model`).
+
+- **Temporal incident correlation** — when saving a new incident, query
+  the Memory Store for related incidents in the last 10 minutes. Link
+  incidents that share a temporal + dependency relationship into a chain:
+
+  ```json
+  {
+    "incident_chain_id": "uuid-of-root",
+    "upstream_incident_id": "uuid-db-latency",
+    "cascade_depth": 3,
+    "cascade_path": ["db-service", "api-service", "sample-app"]
+  }
+  ```
+
+  The Safety Controller prefers actioning the upstream root rather than
+  downstream symptoms — preventing 5 separate restart attempts when the
+  real fix is the database. Chains are visualised in the dashboard with a
+  cascade badge.
 
 ---
 
@@ -568,6 +646,22 @@ gatekeeper.
 - **Dynamic dependency map** — `devops-copilot/depends-on` annotation
   replaces the static `DEPENDENCY_MAP`; cached 60 s, falls back to static
   map on k8s API failure
+- **Transitive blast-radius estimation** (`app/core/blast_radius.py`) — once
+  the dynamic dependency map is live, compute the full transitive closure for
+  the action target. Safety gate automatically tightens based on affected
+  service count:
+
+  ```json
+  {
+    "blast_radius": "high",
+    "affected_services": ["redis", "postgres", "auth-service", "kafka"],
+    "affected_count": 4
+  }
+  ```
+
+  `affected_count > 5 → critical`, `3–5 → high`, `1–2 → medium`, `0 → low`.
+  Stored in every `AnalysisResult` and shown as a badge in the dashboard.
+
 - Deploy via Minikube; Phase 7 e2e suite must pass against it
 
 ---
@@ -582,10 +676,28 @@ gatekeeper.
 - **Pipeline failure webhook** — `POST /api/v1/webhook/pipeline-failure`
   accepts GitLab/GitHub payloads, runs `analyze()`, posts result as MR
   comment
-- **Slack notifier** — for any destructive action: posts action, target,
-  root cause, dry-run diff, and a **Cancel** button (calls unfreeze within
-  60 s window before `pending → executing`). Configured via
-  `SLACK_WEBHOOK_URL` (no-op if unset)
+- **Human approval workflow** — replaces the simple 60 s cancel window with
+  a first-class approval primitive. Actions on `criticality=critical` services,
+  rollbacks, production namespaces, or high blast-radius targets enter
+  `awaiting_approval` state before executing:
+
+  ```json
+  {
+    "approval_required": true,
+    "approval_reason": "criticality=critical",
+    "approval_id": "uuid",
+    "expires_in_seconds": 300
+  }
+  ```
+
+  Approval tokens are HMAC-signed (replay/forgery protection). Slack posts a
+  Block Kit message with **Approve** / **Reject** buttons. New endpoints:
+  - `POST /api/v1/approvals/{id}/approve` — verifies token, triggers execution
+  - `POST /api/v1/approvals/{id}/reject` — cancels, records `rejected_by`
+
+  Non-approval-required actions (dev mode, low criticality) still execute
+  immediately — no blanket slowdown. Configured via `SLACK_WEBHOOK_URL` and
+  `APPROVAL_SECRET_KEY` env vars.
 - **README runbook** — how to unfreeze a service, interpret the dashboard,
   add an eval scenario
 
