@@ -12,8 +12,11 @@ services:
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
       - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
     networks:
       - elk
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
       interval: 10s
@@ -31,6 +34,7 @@ services:
       - "5601:5601"
     networks:
       - elk
+    restart: unless-stopped
 
   # ── Logstash ───────────────────────────────────────────────────────────────
   logstash:
@@ -87,6 +91,31 @@ services:
     networks:
       - elk
 
+  # ── Kibana Dashboard Importer (runs once, then exits) ─────────────────────
+  kibana-setup:
+    image: curlimages/curl:latest
+    container_name: kibana-setup
+    depends_on:
+      kibana:
+        condition: service_started
+    restart: "no"
+    entrypoint: >
+      sh -c "
+        echo 'Waiting for Kibana to be ready...';
+        until curl -sf http://kibana:5601/api/status | grep -q '\"level\":\"available\"'; do
+          sleep 5;
+        done;
+        echo 'Importing dashboards...';
+        curl -sf -X POST http://kibana:5601/api/saved_objects/_import?overwrite=true
+          -H 'kbn-xsrf: true'
+          --form file=@/dashboards/kibana-dashboard.ndjson;
+        echo 'Dashboard import complete.'
+      "
+    volumes:
+      - ./elk:/dashboards:ro
+    networks:
+      - elk
+
   # ── Agent Backend ──────────────────────────────────────────────────────────
   agent-backend:
     build: ./agent-backend
@@ -108,6 +137,7 @@ services:
 
 volumes:
   app-logs:
+  esdata:    # persists Elasticsearch indices across docker-compose down/up
 
 networks:
   elk:
