@@ -1,0 +1,8 @@
+{
+  "error_type": "build_failure",
+  "severity": "high",
+  "correct_action": "trigger_retry",
+  "should_act": true,
+  "root_cause_keywords": ["SyntaxError", "invalid syntax", "unexpected token", "compile", "analytics.py"],
+  "description": "Build #4821 failed during the compile step due to a Python SyntaxError in src/analytics.py line 87 (missing closing parenthesis). The developer must fix the syntax error and push a new commit; retrying without a code fix will not help."
+}

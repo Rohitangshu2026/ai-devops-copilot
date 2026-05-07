@@ -1,0 +1,8 @@
+{
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["slow query", "sequential scan", "missing index", "connection pool exhausted", "cascade"],
+  "description": "A slow query on the orders table (missing index on created_at, sequential scan of 4.2M rows) is holding DB connections, exhausting the pool, and causing a cascade of 500 errors across all endpoints. An operator must add a DB index and investigate the query plan."
+}

@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["JWT_SIGNING_KEY", "SECRET_KEY", "secret not found", "not configured", "token"],
+  "description": "The Kubernetes Secret 'jwt-signing-secret' is missing from the 'dev' namespace, so the JWT_SIGNING_KEY/SECRET_KEY env var is never injected. All token refresh requests fail with 500. An operator must create the secret; the app continues to serve other endpoints normally."
+}

@@ -1,0 +1,8 @@
+{
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["timeout", "connection pool exhausted", "i/o timeout", "intermittent", "flapping"],
+  "description": "Database connectivity is intermittently failing with i/o timeouts and connection pool exhaustion. Requests succeed and fail alternately, indicating a flapping DB backend or network path. Operator must investigate the PostgreSQL pod and network stability."
+}

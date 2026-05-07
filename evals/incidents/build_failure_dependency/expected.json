@@ -1,0 +1,8 @@
+{
+  "error_type": "build_failure",
+  "severity": "high",
+  "correct_action": "trigger_retry",
+  "should_act": true,
+  "root_cause_keywords": ["No matching distribution", "scikit-learn", "package not found", "pip install", "requirements"],
+  "description": "Build #4822 failed because requirements.txt pins scikit-learn==1.5.0, which does not exist on PyPI (latest available is 1.4.1.post1). The developer must update requirements.txt to a valid version before retrying."
+}

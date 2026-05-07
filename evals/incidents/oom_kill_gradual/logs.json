@@ -1,0 +1,17 @@
+[
+  {"message": "memory usage: 512MB / 2GB (25%)", "level": "INFO", "@timestamp": "2026-05-07T10:00:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/list 200 OK", "level": "INFO", "@timestamp": "2026-05-07T10:15:00Z", "endpoint": "/api/users/list", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 780MB / 2GB (38%)", "level": "INFO", "@timestamp": "2026-05-07T10:30:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/list 200 OK", "level": "INFO", "@timestamp": "2026-05-07T10:45:00Z", "endpoint": "/api/users/list", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.1GB / 2GB (55%)", "level": "INFO", "@timestamp": "2026-05-07T11:00:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GC overhead increasing: pause times > 200ms", "level": "WARNING", "@timestamp": "2026-05-07T11:15:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.5GB / 2GB (75%)", "level": "WARNING", "@timestamp": "2026-05-07T11:30:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/list 200 OK (latency: 850ms)", "level": "WARNING", "@timestamp": "2026-05-07T11:40:00Z", "endpoint": "/api/users/list", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.78GB / 2GB (89%)", "level": "WARNING", "@timestamp": "2026-05-07T11:50:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/list 500 Internal Server Error: java.lang.OutOfMemoryError: Java heap space", "level": "ERROR", "@timestamp": "2026-05-07T11:55:00Z", "endpoint": "/api/users/list", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "java.lang.OutOfMemoryError: Java heap space at com.example.UserRepository.findAll(UserRepository.java:42)", "level": "ERROR", "@timestamp": "2026-05-07T11:55:01Z", "endpoint": "/api/users/list", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.99GB / 2GB (99%)", "level": "ERROR", "@timestamp": "2026-05-07T11:58:00Z", "endpoint": "/healthz", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "OOMKilled: container sample-app exceeded memory limit of 2Gi", "level": "ERROR", "@timestamp": "2026-05-07T11:59:30Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Container sample-app terminated with exit code 137 (OOMKilled)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:31Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-7d9f8c6b4-mn3r1 restarting (reason: OOMKilled)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:32Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

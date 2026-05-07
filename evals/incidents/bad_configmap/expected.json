@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "rollback",
+  "should_act": true,
+  "root_cause_keywords": ["config key not found", "KeyError", "configmap", "payment.gateway.url", "missing key"],
+  "description": "ConfigMap was updated to v14 which accidentally omitted the 'payment.gateway.url' key that was present in v13. All payment endpoints are now failing with 500 errors. Rollback the ConfigMap to v13 to restore payment functionality."
+}

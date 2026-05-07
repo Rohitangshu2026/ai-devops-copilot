@@ -1,0 +1,8 @@
+{
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["connection refused", "database", "postgres", "5432", "cold start"],
+  "description": "Application failed to start because the PostgreSQL database at postgres-svc:5432 is not accepting connections. This is a cold-start dependency failure — the DB service or its pod is likely not running. An operator must investigate the database service."
+}

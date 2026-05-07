@@ -1,0 +1,8 @@
+{
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["network partition", "i/o timeout", "node unreachable", "intermittent", "multiple services"],
+  "description": "Multiple services on worker-03 (recommendation-svc and kafka-svc) are intermittently unreachable with i/o timeouts, while the same services succeed from other nodes. A network partition or NIC failure on worker-03 is suspected. An operator must investigate node and CNI health."
+}

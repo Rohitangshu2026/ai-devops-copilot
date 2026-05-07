@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "critical",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["ResourceQuotaExceeded", "quota", "CPU limit", "memory limit", "namespace"],
+  "description": "Kubernetes ResourceQuota in namespace 'dev' is exhausted — CPU capped at 4000m and memory at 4096Mi. Only 3 of 8 desired worker pods could be scheduled, running the batch job at 37% capacity. An operator must increase the namespace quota or free existing resources."
+}

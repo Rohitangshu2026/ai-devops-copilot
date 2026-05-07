@@ -1,0 +1,17 @@
+[
+  {"message": "CI pipeline started: test #4830 (branch: feature/discount-engine, commit: c9d3e56)", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Running test suite: pytest tests/ -v", "level": "INFO", "@timestamp": "2026-05-07T12:00:10Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_pricing.py::test_apply_discount_percentage PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:15Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_pricing.py::test_apply_discount_fixed PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:15Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_pricing.py::test_apply_discount_compound FAILED", "level": "ERROR", "@timestamp": "2026-05-07T12:00:16Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "AssertionError: assert 85.00 == 80.75 — compound discount calculation incorrect (expected 15% + $5 = $80.75, got $85.00)", "level": "ERROR", "@timestamp": "2026-05-07T12:00:16Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_pricing.py::test_discount_exceeds_price FAILED", "level": "ERROR", "@timestamp": "2026-05-07T12:00:16Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "AssertionError: assert 0 == -15.00 — discount should clamp to zero, not go negative", "level": "ERROR", "@timestamp": "2026-05-07T12:00:16Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_orders.py::test_create_order PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:18Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_orders.py::test_cancel_order PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:19Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_users.py::test_register PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:21Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "FAILED tests/test_pricing.py::test_apply_discount_compound — 1 assertion error", "level": "ERROR", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "FAILED tests/test_pricing.py::test_discount_exceeds_price — 1 assertion error", "level": "ERROR", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "===== 2 failed, 14 passed in 15.3s =====", "level": "ERROR", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Test run #4830 FAILED: 2/16 tests failed (branch: feature/discount-engine)", "level": "ERROR", "@timestamp": "2026-05-07T12:00:26Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

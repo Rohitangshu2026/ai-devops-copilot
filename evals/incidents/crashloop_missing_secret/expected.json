@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["DATABASE_PASSWORD", "secret not found", "environment variable", "CrashLoopBackOff"],
+  "description": "Pod is crash-looping because the Kubernetes Secret 'db-credentials' is missing from the 'dev' namespace, so DATABASE_PASSWORD is never injected. An operator must create the secret; automated restart alone will not fix this."
+}

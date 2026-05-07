@@ -1,0 +1,8 @@
+{
+  "error_type": "test_failure",
+  "severity": "low",
+  "correct_action": "notify",
+  "should_act": false,
+  "root_cause_keywords": ["flaky", "rerun", "race condition", "test infrastructure", "intermittent"],
+  "description": "Two integration tests failed due to timing/race conditions in the test environment (not production code bugs) and passed on rerun. The overall test suite passed. Production is unaffected; tests should be hardened to eliminate flakiness, but no immediate action is required."
+}

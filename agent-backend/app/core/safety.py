@@ -1,7 +1,8 @@
-"""Main safety controller for Phase 5 + Phase 6 hardening.
+"""Main safety controller for Phase 5 + Phase 6 + Phase 9 hardening.
 
-Runs eight ordered checks between an LLM-proposed action and Kubernetes:
+Runs nine ordered checks between an LLM-proposed action and Kubernetes:
 
+0. Anomaly gate          — z-score < ANOMALY_Z_THRESHOLD blocks destructive actions (Phase 9e).
 1. Causality gate        — unverified causality blocks destructive actions.
 2. Decision policy       — apply_policy() may override the action to no_action.
 3. Loop detection        — repeated actions trigger escalation or freeze.
@@ -52,6 +53,7 @@ async def validate(
     proposed_action: dict[str, Any],
     causality: CausalityResult,
     cascade_depth: int = 0,
+    anomaly_score: float = -1.0,
 ) -> SafetyResult:
     """Run all safety checks and return a SafetyResult.
 
@@ -61,6 +63,40 @@ async def validate(
     action_type: str = proposed_action.get("type", "no_action")
     namespace: str = proposed_action.get("namespace", "default")
     checks: dict[str, Any] = {}
+
+    # ── 0. Anomaly gate (Phase 9e) ───────────────────────────────────────────
+    # A z-score below ANOMALY_Z_THRESHOLD means the current error rate is not
+    # statistically anomalous. Destructive actions are blocked on routine traffic.
+    # anomaly_score < 0 means "no baseline available" — gate is skipped.
+    if action_type in _DESTRUCTIVE_ACTIONS and anomaly_score >= 0.0:
+        from app.core.anomaly import ANOMALY_Z_THRESHOLD
+        checks["anomaly_gate"] = {
+            "z_score": round(anomaly_score, 3),
+            "threshold": ANOMALY_Z_THRESHOLD,
+            "passed": anomaly_score >= ANOMALY_Z_THRESHOLD,
+        }
+        if anomaly_score < ANOMALY_Z_THRESHOLD:
+            logger.warning({
+                "message": "safety_anomaly_gate_denied",
+                "service": service,
+                "action": action_type,
+                "z_score": round(anomaly_score, 3),
+                "threshold": ANOMALY_Z_THRESHOLD,
+            })
+            try:
+                from app.utils.prom_metrics import safety_denials_total
+                safety_denials_total.labels(reason="anomaly_gate").inc()
+            except Exception:  # noqa: BLE001
+                pass
+            return SafetyResult(
+                allowed=False,
+                action="no_action",
+                reason=(
+                    f"anomaly gate: z-score {anomaly_score:.3f} < threshold "
+                    f"{ANOMALY_Z_THRESHOLD} — error rate is not statistically anomalous"
+                ),
+                checks=checks,
+            )
 
     # ── 1. Causality gate ────────────────────────────────────────────────────
     if not causality.verified and action_type not in _SAFE_ACTIONS:

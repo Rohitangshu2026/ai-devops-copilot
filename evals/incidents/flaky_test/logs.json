@@ -1,0 +1,17 @@
+[
+  {"message": "CI pipeline started: test #4835 (branch: main, commit: d1e4f67)", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Running test suite: pytest tests/ -v --reruns 2", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_integration.py::test_external_api_call PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:20Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_integration.py::test_webhook_delivery FAILED", "level": "ERROR", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "AssertionError: Expected webhook response in 200ms, got timeout (1003ms) — likely test infrastructure latency", "level": "ERROR", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Rerunning failed test: tests/test_integration.py::test_webhook_delivery (attempt 2/3)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:27Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_integration.py::test_webhook_delivery PASSED (rerun)", "level": "INFO", "@timestamp": "2026-05-07T12:00:32Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_users.py::test_register PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:35Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_users.py::test_login PASSED", "level": "INFO", "@timestamp": "2026-05-07T12:00:37Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_integration.py::test_cache_invalidation FAILED", "level": "ERROR", "@timestamp": "2026-05-07T12:00:42Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "AssertionError: cache entry still present after 100ms — race condition in test teardown", "level": "ERROR", "@timestamp": "2026-05-07T12:00:42Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Rerunning failed test: tests/test_integration.py::test_cache_invalidation (attempt 2/3)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:44Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "tests/test_integration.py::test_cache_invalidation PASSED (rerun)", "level": "INFO", "@timestamp": "2026-05-07T12:00:49Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "===== 0 failed, 18 passed (2 flaky reruns) in 49.2s =====", "level": "WARNING", "@timestamp": "2026-05-07T12:00:55Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Test run #4835 PASSED with flaky test warnings (2 tests required reruns)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:56Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

@@ -4,6 +4,7 @@ import time
 import uuid
 from dataclasses import asdict
 
+from app.core.anomaly import compute_anomaly_score
 from app.core.audit import record_analysis
 from app.core.causality import DEPENDENCY_MAP, validate_causality
 from app.core.confidence import score_confidence
@@ -76,6 +77,15 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             "redirected_to": action_target,
         })
 
+    # ── Phase 9e — Compute statistical anomaly score ─────────────────────────
+    # Default -1.0 means "no baseline available" → anomaly gate is skipped.
+    # A real z-score (>= 0.0) from an established baseline gates destructive actions.
+    _anomaly_score: float = -1.0
+    try:
+        _anomaly_score = await compute_anomaly_score(req.service, summary)
+    except Exception:  # noqa: BLE001
+        pass  # gate bypassed when score cannot be computed
+
     # ── Phase 8e — Pre-safety: determine cascade depth ───────────────────────
     _pre_cascade_depth: int = 0
     _pre_upstream_match: dict | None = None
@@ -92,7 +102,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     except Exception:  # noqa: BLE001
         pass
 
-    # ── Phase 5: safety stack ─────────────────────────────────────────────────
+    # ── Phase 5 + 9: safety stack ─────────────────────────────────────────────
     safety = await safety_validate(
         service=req.service,
         environment=req.environment.value,
@@ -102,6 +112,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         proposed_action=llm_result.get("proposed_action", {}),
         causality=causality,
         cascade_depth=_pre_cascade_depth,
+        anomaly_score=_anomaly_score,
     )
 
     # Override proposed action if safety denied or modified it
@@ -199,6 +210,8 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         upstream_incident_id=upstream_incident_id,
         cascade_depth=cascade_depth,
         cascade_path=cascade_path,
+        anomaly_score=_anomaly_score,
+        cross_validation=llm_result.pop("_cross_validation", None),
     )
 
     logger.info({

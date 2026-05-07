@@ -1,0 +1,16 @@
+[
+  {"message": "GET /api/products 200 OK (latency: 42ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:00Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 38ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:02Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 55ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:04Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "traffic spike detected: 1200 req/min (baseline: 300 req/min)", "level": "WARNING", "@timestamp": "2026-05-07T11:56:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 88ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:05Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 200 OK (latency: 71ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:06Z", "endpoint": "/api/users/profile", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (latency: 95ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:08Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 102ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:10Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 91ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:12Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "auto-scaling: HPA scaling from 2 to 4 replicas (CPU: 72%)", "level": "INFO", "@timestamp": "2026-05-07T11:56:15Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 200 OK (latency: 65ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:30Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 200 OK (latency: 58ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:32Z", "endpoint": "/api/users/profile", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "error rate: 0.8% (2 errors in last 250 requests) — within acceptable threshold", "level": "INFO", "@timestamp": "2026-05-07T11:57:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "all pods healthy, latency within SLA (p99: 145ms)", "level": "INFO", "@timestamp": "2026-05-07T11:57:30Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"}
+]

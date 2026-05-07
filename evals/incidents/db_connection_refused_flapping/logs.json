@@ -1,0 +1,16 @@
+[
+  {"message": "GET /api/orders 200 OK (db_query: 12ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:00Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (db_query: 15ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:10Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 500 Internal Server Error: context deadline exceeded (timeout: 5s)", "level": "ERROR", "@timestamp": "2026-05-07T11:55:22Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "database query timeout after 5000ms on postgres-svc:5432", "level": "ERROR", "@timestamp": "2026-05-07T11:55:22Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (db_query: 18ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:35Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (db_query: 22ms)", "level": "INFO", "@timestamp": "2026-05-07T11:55:50Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 500 Internal Server Error: context deadline exceeded (timeout: 5s)", "level": "ERROR", "@timestamp": "2026-05-07T11:56:03Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "database connection pool exhausted: all 20 connections in use", "level": "WARNING", "@timestamp": "2026-05-07T11:56:04Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 500 Internal Server Error: dial tcp 10.96.42.11:5432: i/o timeout", "level": "ERROR", "@timestamp": "2026-05-07T11:56:20Z", "endpoint": "/api/users/profile", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (db_query: 11ms)", "level": "INFO", "@timestamp": "2026-05-07T11:56:40Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 500 Internal Server Error: context deadline exceeded (timeout: 5s)", "level": "ERROR", "@timestamp": "2026-05-07T11:57:05Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "database query timeout after 5000ms on postgres-svc:5432", "level": "ERROR", "@timestamp": "2026-05-07T11:57:05Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "intermittent DB connectivity: 8 errors in last 2 minutes", "level": "WARNING", "@timestamp": "2026-05-07T11:57:10Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 500 Internal Server Error: context deadline exceeded (timeout: 5s)", "level": "ERROR", "@timestamp": "2026-05-07T11:57:45Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"}
+]

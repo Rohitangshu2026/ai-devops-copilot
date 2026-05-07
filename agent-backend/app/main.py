@@ -1,10 +1,11 @@
 """Agent-backend entry point.
 
-Lifecycle (Phase 6 hardening):
+Lifecycle:
 1. Bootstrap ILM policy on the incident index (Phase 6c).
 2. Recover orphaned execution leases left by previous pod crashes (Phase 6h).
 3. Launch the persistent verification sweeper as a background task (Phase 6b).
 4. Register a SIGHUP handler to hot-reload policy.yaml (Phase 6i).
+5. Launch the daily anomaly baseline refresh sweeper (Phase 9e).
 """
 from __future__ import annotations
 
@@ -26,6 +27,45 @@ logger = get_logger("main")
 
 _sweeper_task: asyncio.Task | None = None
 _sweeper_stop: asyncio.Event | None = None
+_baseline_task: asyncio.Task | None = None
+
+
+async def _run_baseline_sweeper(stop: asyncio.Event, interval_seconds: int = 86400) -> None:
+    """Refresh anomaly baselines for all known services daily.
+
+    On first startup, waits `interval_seconds` before the first refresh to
+    avoid overwhelming ES during cold start.  The refresh is best-effort —
+    failures are logged and the sweeper continues.
+    """
+    logger.info({"message": "baseline_sweeper_started", "interval_seconds": interval_seconds})
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval_seconds)
+        except asyncio.TimeoutError:
+            pass
+        if stop.is_set():
+            break
+
+        # Discover services from recent incidents
+        try:
+            from app.services.memory_store import get_recent_incidents
+            from app.core.anomaly import refresh_baseline_for_service
+
+            recent = await get_recent_incidents(limit=200)
+            services = list({inc.get("service") for inc in recent if inc.get("service")})
+            logger.info({"message": "baseline_refresh_started", "services": services})
+            for svc in services:
+                try:
+                    await refresh_baseline_for_service(svc, lookback_days=7)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning({
+                        "message": "baseline_refresh_service_failed",
+                        "service": svc,
+                        "error": str(exc),
+                    })
+            logger.info({"message": "baseline_refresh_done", "count": len(services)})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning({"message": "baseline_sweeper_error", "error": str(exc)})
 
 
 def _install_sighup_handler() -> None:
@@ -83,6 +123,9 @@ async def lifespan(app: FastAPI):
     # 5. SIGHUP → reload policy.
     _install_sighup_handler()
 
+    # 6. Launch daily anomaly baseline sweeper (Phase 9e).
+    _baseline_task = asyncio.create_task(_run_baseline_sweeper(_sweeper_stop))
+
     yield
 
     logger.info({"message": "agent_backend_stopping"})
@@ -93,6 +136,8 @@ async def lifespan(app: FastAPI):
             await asyncio.wait_for(_sweeper_task, timeout=5.0)
         except asyncio.TimeoutError:
             _sweeper_task.cancel()
+    if _baseline_task is not None and not _baseline_task.done():
+        _baseline_task.cancel()
     await close_client()
     logger.info({"message": "agent_backend_stopped"})
 

@@ -1,0 +1,8 @@
+{
+  "error_type": "unknown",
+  "severity": "low",
+  "correct_action": "no_action",
+  "should_act": false,
+  "root_cause_keywords": ["traffic spike", "HPA", "auto-scaling", "healthy"],
+  "description": "Traffic spiked 4x but the HPA correctly scaled replicas from 2 to 4, latency remained within SLA, and error rate stayed below 1%. The system handled the load gracefully with no intervention required."
+}

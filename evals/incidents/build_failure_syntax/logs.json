@@ -1,0 +1,14 @@
+[
+  {"message": "CI pipeline started: build #4821 (branch: feature/user-analytics, commit: a3f9e12)", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Step 1/6: Cloning repository at commit a3f9e12", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Step 2/6: Installing dependencies (pip install -r requirements.txt)", "level": "INFO", "@timestamp": "2026-05-07T12:00:15Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Dependencies installed successfully (42 packages)", "level": "INFO", "@timestamp": "2026-05-07T12:00:45Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Step 3/6: Compiling application (python -m py_compile src/analytics.py)", "level": "INFO", "@timestamp": "2026-05-07T12:00:46Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ERROR: File \"src/analytics.py\", line 87", "level": "ERROR", "@timestamp": "2026-05-07T12:00:47Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "SyntaxError: invalid syntax at src/analytics.py:87 — unexpected token 'return' (missing closing parenthesis on line 85)", "level": "ERROR", "@timestamp": "2026-05-07T12:00:47Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Build step 'compile' failed with exit code 1", "level": "ERROR", "@timestamp": "2026-05-07T12:00:47Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Step 3/6: FAILED", "level": "ERROR", "@timestamp": "2026-05-07T12:00:47Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Build #4821 FAILED after 47 seconds (branch: feature/user-analytics, commit: a3f9e12)", "level": "ERROR", "@timestamp": "2026-05-07T12:00:52Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Artifact upload skipped (build failed)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:53Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pipeline #4821 status: FAILURE — notifying commit author rohit@example.com", "level": "ERROR", "@timestamp": "2026-05-07T12:00:55Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

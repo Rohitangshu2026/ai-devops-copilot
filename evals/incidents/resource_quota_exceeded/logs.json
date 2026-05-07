@@ -1,0 +1,14 @@
+[
+  {"message": "Deployment sample-app-worker triggered: scaling to 8 replicas for batch job", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-worker-1 created successfully", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-worker-2 created successfully", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-worker-3 created successfully", "level": "INFO", "@timestamp": "2026-05-07T12:00:06Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Error creating pod sample-app-worker-4: exceeded quota: dev/resource-quota, requested: cpu=500m, used: 3500m, limited: 4000m", "level": "ERROR", "@timestamp": "2026-05-07T12:00:07Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Error creating pod sample-app-worker-5: exceeded quota: dev/resource-quota, requested: memory=512Mi, used: 3584Mi, limited: 4096Mi", "level": "ERROR", "@timestamp": "2026-05-07T12:00:07Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Deployment sample-app-worker stalled: 3/8 replicas created (quota exhausted)", "level": "ERROR", "@timestamp": "2026-05-07T12:00:08Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ReplicaSet sample-app-worker unable to create pods: ResourceQuotaExceeded in namespace dev", "level": "ERROR", "@timestamp": "2026-05-07T12:00:10Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "batch job task-processor reporting degraded throughput: 3 workers instead of 8", "level": "ERROR", "@timestamp": "2026-05-07T12:00:30Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/batch/status 200 OK — job running at 37% capacity", "level": "WARNING", "@timestamp": "2026-05-07T12:01:00Z", "endpoint": "/api/batch/status", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "ResourceQuotaExceeded: namespace dev has reached CPU limit (4000m). Requested 500m, available 0m", "level": "ERROR", "@timestamp": "2026-05-07T12:01:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ResourceQuotaExceeded: namespace dev has reached memory limit (4096Mi). Requested 512Mi, available 0Mi", "level": "ERROR", "@timestamp": "2026-05-07T12:01:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

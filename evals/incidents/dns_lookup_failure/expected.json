@@ -1,0 +1,8 @@
+{
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["DNS resolution", "NXDOMAIN", "no such host", "coreDNS", "lookup failed"],
+  "description": "Multiple downstream services are unreachable due to DNS resolution failures. The CoreDNS pod is not ready, causing NXDOMAIN responses for all in-cluster service names. An operator must investigate and restart the CoreDNS deployment."
+}

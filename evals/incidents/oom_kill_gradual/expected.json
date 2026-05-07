@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "restart_pod",
+  "should_act": true,
+  "root_cause_keywords": ["OutOfMemoryError", "heap space", "OOMKilled", "memory leak"],
+  "description": "Memory grew steadily over ~2 hours from 25% to 99%, indicating a memory leak in UserRepository.findAll(). GC pauses increased before the final OOMKill. Pod restart needed; root cause is a memory leak requiring investigation."
+}

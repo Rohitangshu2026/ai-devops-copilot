@@ -94,6 +94,10 @@ def _is_retriable(exc: Exception) -> bool:
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
+_DESTRUCTIVE_ACTIONS = {"restart_pod", "rollback", "scale_up"}
+_HIGH_SEVERITY = {"high", "critical"}
+
+
 async def analyze(
     service: str,
     environment: str,
@@ -106,6 +110,9 @@ async def analyze(
     """
     Try each model in the chain.  For each model, rotate through its API keys
     on retriable errors before moving on to the next model.
+
+    Phase 9d: For destructive actions with high/critical severity, a secondary
+    model cross-validates. Disagreement downgrades the action to 'notify'.
     """
     chain = _model_chain()
     last_exc: Exception | None = None
@@ -124,6 +131,23 @@ async def analyze(
                     "service": service,
                     "model":   model_name,
                 })
+
+                # ── Phase 9d: cross-model voting ──────────────────────────────
+                primary_action = (result.get("proposed_action") or {}).get("type", "no_action")
+                if primary_action in _DESTRUCTIVE_ACTIONS and severity in _HIGH_SEVERITY:
+                    result = await _cross_validate(
+                        primary_result=result,
+                        primary_model=model_name,
+                        chain=chain,
+                        service=service,
+                        environment=environment,
+                        error_type=error_type,
+                        severity=severity,
+                        key_events=key_events,
+                        summary=summary,
+                        lookback_minutes=lookback_minutes,
+                    )
+
                 return result
             except Exception as exc:
                 if not _is_retriable(exc):
@@ -149,6 +173,106 @@ async def analyze(
             })
 
     raise last_exc  # type: ignore[misc]
+
+
+async def _cross_validate(
+    primary_result: dict,
+    primary_model: str,
+    chain: list[str],
+    service: str,
+    environment: str,
+    error_type: str,
+    severity: str,
+    key_events: list,
+    summary: LogSummary,
+    lookback_minutes: int,
+) -> dict:
+    """Run a secondary model call and compare proposed_action.
+
+    If the two models disagree on the action type or error_type, downgrade
+    the action to 'notify' and record the disagreement in '_cross_validation'.
+    Capped at one cross-call per incident to control cost.
+    """
+    primary_action = (primary_result.get("proposed_action") or {}).get("type", "no_action")
+    primary_error_type = primary_result.get("root_causes", [{}])[0].get("cause", "")
+
+    # Select the first model in chain that is NOT the primary model
+    secondary_model = next((m for m in chain if m != primary_model), None)
+    if not secondary_model:
+        # Only one model available — cross-validation not possible
+        primary_result["_cross_validation"] = {
+            "agreed": True,
+            "secondary_model": None,
+            "secondary_action": None,
+            "skipped": True,
+            "reason": "only one model in chain",
+        }
+        return primary_result
+
+    secondary_result: dict = {}
+    try:
+        secondary_keys = _keys_for(secondary_model)
+        secondary_result = await _analyze_with_model(
+            secondary_model,
+            secondary_keys[0] if secondary_keys else "",
+            service, environment, error_type, severity,
+            key_events, summary, lookback_minutes,
+        )
+        logger.info({
+            "message": "cross_validation_completed",
+            "service": service,
+            "primary_model": primary_model,
+            "secondary_model": secondary_model,
+        })
+    except Exception as exc:  # noqa: BLE001
+        # Cross-validation failure should not block primary result
+        logger.warning({
+            "message": "cross_validation_failed",
+            "service": service,
+            "secondary_model": secondary_model,
+            "error": str(exc),
+        })
+        primary_result["_cross_validation"] = {
+            "agreed": True,
+            "secondary_model": secondary_model,
+            "secondary_action": None,
+            "skipped": True,
+            "reason": f"secondary model error: {exc}",
+        }
+        return primary_result
+
+    secondary_action = (secondary_result.get("proposed_action") or {}).get("type", "no_action")
+    agreed = primary_action == secondary_action
+
+    primary_result["_cross_validation"] = {
+        "agreed": agreed,
+        "primary_model": primary_model,
+        "secondary_model": secondary_model,
+        "primary_action": primary_action,
+        "secondary_action": secondary_action,
+        "skipped": False,
+    }
+
+    if not agreed:
+        logger.warning({
+            "message": "cross_model_disagreement",
+            "service": service,
+            "primary_model": primary_model,
+            "secondary_model": secondary_model,
+            "primary_action": primary_action,
+            "secondary_action": secondary_action,
+        })
+        # Downgrade to notify — don't act when models disagree on a destructive action
+        if "proposed_action" not in primary_result:
+            primary_result["proposed_action"] = {}
+        primary_result["proposed_action"]["type"] = "notify"
+        primary_result["proposed_action"]["reason"] = (
+            f"cross-model disagreement: {primary_model} proposed '{primary_action}' "
+            f"but {secondary_model} proposed '{secondary_action}'"
+        )
+        primary_result["_cross_validation"]["downgraded_to"] = "notify"
+
+    return primary_result
 
 
 async def _analyze_with_model(

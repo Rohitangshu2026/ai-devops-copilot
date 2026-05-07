@@ -1,0 +1,15 @@
+[
+  {"message": "Starting sample-app v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Loading configuration from /etc/app/config.yaml", "level": "INFO", "@timestamp": "2026-05-07T12:00:01Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "FATAL: failed to parse config: yaml: line 14: mapping values are not allowed in this context", "level": "ERROR", "@timestamp": "2026-05-07T12:00:01Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Container sample-app exited with code 1", "level": "ERROR", "@timestamp": "2026-05-07T12:00:02Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Back-off restarting failed container sample-app in pod sample-app-5f7b9d6c8-qrt4p", "level": "ERROR", "@timestamp": "2026-05-07T12:00:32Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Starting sample-app v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:33Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Loading configuration from /etc/app/config.yaml", "level": "INFO", "@timestamp": "2026-05-07T12:00:33Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "FATAL: failed to parse config: yaml: line 14: mapping values are not allowed in this context", "level": "ERROR", "@timestamp": "2026-05-07T12:00:34Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Container sample-app exited with code 1", "level": "ERROR", "@timestamp": "2026-05-07T12:00:34Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "CrashLoopBackOff: pod sample-app-5f7b9d6c8-qrt4p (restart count: 3)", "level": "ERROR", "@timestamp": "2026-05-07T12:02:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "CrashLoopBackOff: pod sample-app-5f7b9d6c8-qrt4p (restart count: 5)", "level": "ERROR", "@timestamp": "2026-05-07T12:06:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /healthz 503 Service Unavailable", "level": "ERROR", "@timestamp": "2026-05-07T12:06:30Z", "endpoint": "/healthz", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "CrashLoopBackOff: pod sample-app-5f7b9d6c8-qrt4p (restart count: 8)", "level": "ERROR", "@timestamp": "2026-05-07T12:16:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

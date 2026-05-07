@@ -1,0 +1,14 @@
+[
+  {"message": "Starting sample-app v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Initializing database connection pool (host: postgres-svc:5432, db: appdb)", "level": "INFO", "@timestamp": "2026-05-07T12:00:01Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ERROR: failed to connect to database: dial tcp 10.96.42.11:5432: connect: connection refused", "level": "ERROR", "@timestamp": "2026-05-07T12:00:06Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Retrying database connection (attempt 2/5, backoff: 2s)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:08Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ERROR: failed to connect to database: dial tcp 10.96.42.11:5432: connect: connection refused", "level": "ERROR", "@timestamp": "2026-05-07T12:00:10Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Retrying database connection (attempt 3/5, backoff: 4s)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:14Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ERROR: failed to connect to database: dial tcp 10.96.42.11:5432: connect: connection refused", "level": "ERROR", "@timestamp": "2026-05-07T12:00:18Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Retrying database connection (attempt 4/5, backoff: 8s)", "level": "WARNING", "@timestamp": "2026-05-07T12:00:26Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ERROR: failed to connect to database: dial tcp 10.96.42.11:5432: connect: connection refused", "level": "ERROR", "@timestamp": "2026-05-07T12:00:34Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "FATAL: all database connection attempts failed, service cannot start", "level": "ERROR", "@timestamp": "2026-05-07T12:00:34Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /healthz 503 Service Unavailable: database not connected", "level": "ERROR", "@timestamp": "2026-05-07T12:00:45Z", "endpoint": "/healthz", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/users 503 Service Unavailable", "level": "ERROR", "@timestamp": "2026-05-07T12:01:00Z", "endpoint": "/api/users", "status_code": 503, "service": "sample-app", "environment": "dev"}
+]

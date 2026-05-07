@@ -1,0 +1,14 @@
+[
+  {"message": "Deployment sample-app updated: configmap version bumped to v14", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Starting sample-app v2.4.1 with configmap sample-app-config v14", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/health 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:10Z", "endpoint": "/api/health", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:15Z", "endpoint": "/api/users", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/payments/charge 500 Internal Server Error: config key 'payment.gateway.url' not found", "level": "ERROR", "@timestamp": "2026-05-07T12:00:20Z", "endpoint": "/api/payments/charge", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "KeyError: 'payment.gateway.url' missing from loaded config map", "level": "ERROR", "@timestamp": "2026-05-07T12:00:20Z", "endpoint": "/api/payments/charge", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/payments/charge 500 Internal Server Error: config key 'payment.gateway.url' not found", "level": "ERROR", "@timestamp": "2026-05-07T12:00:35Z", "endpoint": "/api/payments/charge", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/payments/refund 500 Internal Server Error: config key 'payment.gateway.url' not found", "level": "ERROR", "@timestamp": "2026-05-07T12:00:40Z", "endpoint": "/api/payments/refund", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:50Z", "endpoint": "/api/users", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/payments/charge 500 Internal Server Error: config key 'payment.gateway.url' not found", "level": "ERROR", "@timestamp": "2026-05-07T12:01:00Z", "endpoint": "/api/payments/charge", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "config diff detected: key 'payment.gateway.url' present in v13, absent in v14", "level": "ERROR", "@timestamp": "2026-05-07T12:01:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/payments/charge 500 Internal Server Error: config key 'payment.gateway.url' not found", "level": "ERROR", "@timestamp": "2026-05-07T12:01:20Z", "endpoint": "/api/payments/charge", "status_code": 500, "service": "sample-app", "environment": "dev"}
+]

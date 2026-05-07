@@ -1,0 +1,17 @@
+[
+  {"message": "Deployment sample-app started: rolling update to v2.4.1 (previous: v2.4.0)", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-7d9f8c6b4-new1 scheduled on node worker-01", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pulling image ghcr.io/myorg/sample-app:v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:06Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Image pulled successfully: ghcr.io/myorg/sample-app:v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:20Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Container sample-app started in pod sample-app-7d9f8c6b4-new1", "level": "INFO", "@timestamp": "2026-05-07T12:00:22Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /healthz 200 OK (new pod sample-app-7d9f8c6b4-new1 ready)", "level": "INFO", "@timestamp": "2026-05-07T12:00:32Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "Rolling update: terminating old pod sample-app-5f4a2c1d0-old1", "level": "INFO", "@timestamp": "2026-05-07T12:00:35Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:40Z", "endpoint": "/api/users", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-7d9f8c6b4-new2 scheduled on node worker-02", "level": "INFO", "@timestamp": "2026-05-07T12:00:50Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /healthz 200 OK (new pod sample-app-7d9f8c6b4-new2 ready)", "level": "INFO", "@timestamp": "2026-05-07T12:01:05Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "Rolling update: terminating old pod sample-app-5f4a2c1d0-old2", "level": "INFO", "@timestamp": "2026-05-07T12:01:08Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Deployment sample-app v2.4.1 rollout complete: 2/2 pods updated and healthy", "level": "INFO", "@timestamp": "2026-05-07T12:01:30Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users 200 OK (latency: 48ms)", "level": "INFO", "@timestamp": "2026-05-07T12:01:35Z", "endpoint": "/api/users", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 200 OK (latency: 52ms)", "level": "INFO", "@timestamp": "2026-05-07T12:01:40Z", "endpoint": "/api/orders", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "all health checks passing, error rate: 0.0%", "level": "INFO", "@timestamp": "2026-05-07T12:02:00Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"}
+]

@@ -1,0 +1,13 @@
+[
+  {"message": "Deployment sample-app updated: image changed to ghcr.io/myorg/sample-app:v2.5.0", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-8b4e2f9a1-ck7dv scheduled on node worker-02", "level": "INFO", "@timestamp": "2026-05-07T12:00:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pulling image ghcr.io/myorg/sample-app:v2.5.0", "level": "INFO", "@timestamp": "2026-05-07T12:00:06Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Failed to pull image ghcr.io/myorg/sample-app:v2.5.0: rpc error: code = Unknown desc = failed to pull and unpack image: failed to resolve reference ghcr.io/myorg/sample-app:v2.5.0: unexpected status code 404 Not Found", "level": "ERROR", "@timestamp": "2026-05-07T12:00:30Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Error: ErrImagePull for container sample-app", "level": "ERROR", "@timestamp": "2026-05-07T12:00:31Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Failed to pull image ghcr.io/myorg/sample-app:v2.5.0: 404 Not Found", "level": "ERROR", "@timestamp": "2026-05-07T12:01:15Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ImagePullBackOff: back-off pulling image ghcr.io/myorg/sample-app:v2.5.0", "level": "ERROR", "@timestamp": "2026-05-07T12:01:16Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /healthz 503 Service Unavailable (pod not ready)", "level": "ERROR", "@timestamp": "2026-05-07T12:01:30Z", "endpoint": "/healthz", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "Failed to pull image ghcr.io/myorg/sample-app:v2.5.0: 404 Not Found", "level": "ERROR", "@timestamp": "2026-05-07T12:03:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "ImagePullBackOff: back-off pulling image ghcr.io/myorg/sample-app:v2.5.0 (backoff: 320s)", "level": "ERROR", "@timestamp": "2026-05-07T12:03:01Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Deployment sample-app rollout stalled: pod sample-app-8b4e2f9a1-ck7dv stuck in Pending/ImagePullBackOff", "level": "ERROR", "@timestamp": "2026-05-07T12:05:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"}
+]

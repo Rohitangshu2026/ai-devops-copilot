@@ -1,0 +1,17 @@
+[
+  {"message": "GET /api/users/profile 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:58:01Z", "endpoint": "/api/users/profile", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders/recent 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:58:15Z", "endpoint": "/api/orders/recent", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/reports/generate 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:58:30Z", "endpoint": "/api/reports/generate", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.2GB / 2GB (60%)", "level": "INFO", "@timestamp": "2026-05-07T11:58:45Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/reports/generate 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:59:00Z", "endpoint": "/api/reports/generate", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/reports/generate 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:59:05Z", "endpoint": "/api/reports/generate", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/reports/generate 200 OK", "level": "INFO", "@timestamp": "2026-05-07T11:59:08Z", "endpoint": "/api/reports/generate", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "WARNING: memory usage high: 1.85GB / 2GB (92%)", "level": "WARNING", "@timestamp": "2026-05-07T11:59:10Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/reports/generate 500 Internal Server Error", "level": "ERROR", "@timestamp": "2026-05-07T11:59:11Z", "endpoint": "/api/reports/generate", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "OOMKilled: container sample-app exceeded memory limit of 2Gi", "level": "ERROR", "@timestamp": "2026-05-07T11:59:12Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Container sample-app terminated with exit code 137 (OOMKilled)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:12Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Pod sample-app-7d9f8c6b4-xkp2q restarting (reason: OOMKilled)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:13Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 503 Service Unavailable", "level": "ERROR", "@timestamp": "2026-05-07T11:59:14Z", "endpoint": "/api/users/profile", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders/recent 503 Service Unavailable", "level": "ERROR", "@timestamp": "2026-05-07T11:59:15Z", "endpoint": "/api/orders/recent", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "liveness probe failed: connection refused on port 8080", "level": "ERROR", "@timestamp": "2026-05-07T11:59:20Z", "endpoint": "/healthz", "status_code": 503, "service": "sample-app", "environment": "dev"}
+]

@@ -752,7 +752,10 @@ async def test_call_openai_respects_max_tool_rounds():
         result = await _call_openai("analyze this", "svc", 30, "gpt-4o-mini", "key-x")
 
     assert mock_create.await_count == _MAX_TOOL_ROUNDS
-    assert result == {}   # no text content in final response
+    # result only contains _tool_calls; no LLM text content was produced
+    result_without_meta = {k: v for k, v in result.items() if k != "_tool_calls"}
+    assert result_without_meta == {}
+    assert "_tool_calls" in result
 
 
 @pytest.mark.asyncio

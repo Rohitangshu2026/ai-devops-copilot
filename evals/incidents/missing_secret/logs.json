@@ -1,0 +1,14 @@
+[
+  {"message": "Starting sample-app v2.4.1", "level": "INFO", "@timestamp": "2026-05-07T12:00:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "Application started successfully", "level": "INFO", "@timestamp": "2026-05-07T12:00:03Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/health 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:10Z", "endpoint": "/api/health", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/login 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:20Z", "endpoint": "/api/auth/login", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:00:25Z", "endpoint": "/api/users/profile", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/token/refresh 500 Internal Server Error: JWT_SIGNING_KEY is not configured", "level": "ERROR", "@timestamp": "2026-05-07T12:00:30Z", "endpoint": "/api/auth/token/refresh", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "RuntimeError: SECRET_KEY environment variable is not set; cannot sign tokens", "level": "ERROR", "@timestamp": "2026-05-07T12:00:30Z", "endpoint": "/api/auth/token/refresh", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/token/refresh 500 Internal Server Error: JWT_SIGNING_KEY is not configured", "level": "ERROR", "@timestamp": "2026-05-07T12:00:50Z", "endpoint": "/api/auth/token/refresh", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "Secret 'jwt-signing-secret' not found in namespace 'dev'", "level": "ERROR", "@timestamp": "2026-05-07T12:01:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/token/refresh 500 Internal Server Error: JWT_SIGNING_KEY is not configured", "level": "ERROR", "@timestamp": "2026-05-07T12:01:10Z", "endpoint": "/api/auth/token/refresh", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/login 200 OK", "level": "INFO", "@timestamp": "2026-05-07T12:01:20Z", "endpoint": "/api/auth/login", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "POST /api/auth/token/refresh 500 Internal Server Error: JWT_SIGNING_KEY is not configured", "level": "ERROR", "@timestamp": "2026-05-07T12:01:30Z", "endpoint": "/api/auth/token/refresh", "status_code": 500, "service": "sample-app", "environment": "dev"}
+]

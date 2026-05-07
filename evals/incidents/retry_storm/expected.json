@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "scale_up",
+  "should_act": true,
+  "root_cause_keywords": ["retry storm", "retry amplification", "worker pool saturated", "queue depth", "upstream timeout"],
+  "description": "A slow downstream service (product-catalog-svc) triggered aggressive retry logic, amplifying request volume 7x to 840 req/min. This saturated worker threads and caused cascading failures across all endpoints. Immediate scale-up is needed alongside circuit breaker activation."
+}

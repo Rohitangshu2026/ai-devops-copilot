@@ -1,0 +1,16 @@
+[
+  {"message": "GET /api/products 200 OK (latency: 45ms)", "level": "INFO", "@timestamp": "2026-05-07T11:58:00Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "downstream service product-catalog-svc responding slowly (p99: 3200ms)", "level": "WARNING", "@timestamp": "2026-05-07T11:58:30Z", "endpoint": "/api/products", "status_code": 200, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 503 Service Unavailable: upstream timeout", "level": "ERROR", "@timestamp": "2026-05-07T11:58:45Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "Retrying request to product-catalog-svc (attempt 1/3)", "level": "WARNING", "@timestamp": "2026-05-07T11:58:46Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 503 Service Unavailable: upstream timeout (retry 1)", "level": "ERROR", "@timestamp": "2026-05-07T11:58:51Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "Retrying request to product-catalog-svc (attempt 2/3)", "level": "WARNING", "@timestamp": "2026-05-07T11:58:52Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 503 Service Unavailable: upstream timeout (retry 2)", "level": "ERROR", "@timestamp": "2026-05-07T11:58:57Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "request queue depth: 142 pending (normal: <20)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:00Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "CPU usage: 94% (spike from retry storm)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:05Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/products 503 Service Unavailable: upstream timeout", "level": "ERROR", "@timestamp": "2026-05-07T11:59:10Z", "endpoint": "/api/products", "status_code": 503, "service": "sample-app", "environment": "dev"},
+  {"message": "retry amplification detected: 840 outbound requests/min to product-catalog-svc (normal: 120/min)", "level": "ERROR", "@timestamp": "2026-05-07T11:59:12Z", "endpoint": "", "status_code": 0, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/users/profile 500 Internal Server Error: worker pool saturated", "level": "ERROR", "@timestamp": "2026-05-07T11:59:15Z", "endpoint": "/api/users/profile", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "GET /api/orders 500 Internal Server Error: worker pool saturated", "level": "ERROR", "@timestamp": "2026-05-07T11:59:18Z", "endpoint": "/api/orders", "status_code": 500, "service": "sample-app", "environment": "dev"},
+  {"message": "memory usage: 1.7GB / 2GB (85%) — retry buffers growing", "level": "ERROR", "@timestamp": "2026-05-07T11:59:20Z", "endpoint": "/healthz", "status_code": 200, "service": "sample-app", "environment": "dev"}
+]

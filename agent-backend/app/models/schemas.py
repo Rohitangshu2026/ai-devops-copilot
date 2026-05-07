@@ -64,3 +64,7 @@ class AnalysisResult(BaseModel):
     upstream_incident_id: Optional[str] = None
     cascade_depth: int = 0
     cascade_path: List[str] = []
+    # Phase 9e — statistical anomaly score (z-score vs 7-day baseline)
+    anomaly_score: float = 0.0
+    # Phase 9d — cross-model voting result
+    cross_validation: Optional[Dict[str, Any]] = None

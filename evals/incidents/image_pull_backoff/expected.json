@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "high",
+  "correct_action": "rollback",
+  "should_act": true,
+  "root_cause_keywords": ["ImagePullBackOff", "ErrImagePull", "404 Not Found", "image not found"],
+  "description": "Deployment to image tag v2.5.0 failed because the image does not exist in the container registry (HTTP 404). The deployment is stalled and rollback to the previous working image tag is required."
+}

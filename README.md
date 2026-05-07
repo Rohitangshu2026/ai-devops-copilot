@@ -7,24 +7,38 @@ through a deterministic safety pipeline.
 ## What it does
 
 ```
-Logs → ELK Stack → Log Summariser → Confidence Scorer
+Logs → ELK Stack → Log Summariser → Confidence Scorer ← Memory Boost (history)
                                           │
                                     LLM (tool use)
                                     ├── search_logs
                                     ├── get_error_frequency
                                     └── get_k8s_events
                                           │
+                                  Cross-Model Voting       ← Phase 9d
+                                  (destructive actions)
+                                          │
                                     Causality Checker
                                           │
                                     Decision Engine (policy.yaml)
                                           │
-                                    Safety Controller (8 gates)
+                                  Safety Controller (9 gates)
+                                  ├── 0: Anomaly gate (z-score baseline) ← Phase 9e
+                                  ├── 1: Causality gate
+                                  ├── 2: Decision policy
+                                  ├── 3: Loop detector
+                                  ├── 4: Idempotency lock
+                                  ├── 5: Namespace isolation
+                                  ├── 6: Severity gate
+                                  ├── 7: Rate limit
+                                  └── 8: Action budget
                                           │
                                     Action Executor (kubectl, async)
                                           │
                                     Impact Verifier (ES-backed sweeper)
                                           │
                                     Audit Log (devops-incidents-*)
+                                          │
+                                  Memory Store ← feeds confidence boost + baselines
 ```
 
 ---
@@ -147,6 +161,10 @@ ADMIN_API_KEY=
 |---|---|---|---|
 | `POST` | `/api/v1/analyze` | — | Run full analysis pipeline |
 | `GET` | `/api/v1/incidents/{id}` | — | Poll async action state |
+| `GET` | `/api/v1/incidents/{id}/timeline` | — | Chronological event timeline for an incident |
+| `GET` | `/api/v1/metrics` | — | JSON operational metrics (fix rate, MTTR, …) |
+| `GET` | `/metrics` | — | Prometheus scrape endpoint |
+| `GET` | `/dashboard` | — | HTML incident dashboard (last 50 incidents) |
 | `POST` | `/api/v1/services/{service}/unfreeze` | Admin key | Clear a frozen service |
 | `POST` | `/api/v1/admin/reload-policy` | Admin key | Hot-reload `policy.yaml` |
 | `GET` | `/health` | — | Liveness check |
@@ -166,13 +184,18 @@ is set in `.env`.
     "+2 severity=high",
     "+2 error_ratio=0.80 (>10%)",
     "+1 event_count=12 (>=10)",
-    "+1 error_type is dependency_error (known)"
+    "+1 historical_match (2 of 3 similar incidents resolved)"
   ],
   "proposed_action": {"type": "notify", "target": "sample-app", "reason": "..."},
   "safety_decision": "allowed",
   "causality_verified": true,
   "incident_id": "550e8400-e29b-41d4-a716-446655440000",
-  "execution_result": {"status": "executing"}
+  "execution_result": {"status": "executing"},
+  "anomaly_score": 3.14,
+  "cross_validation": {"agreed": true, "primary_model": "gemma-4-31b-it", "secondary_model": "claude-haiku-3-5"},
+  "cascade_depth": 1,
+  "upstream_incident_id": "db-incident-uuid",
+  "incident_chain_id": "chain-uuid"
 }
 ```
 
@@ -193,12 +216,13 @@ final `action_state` when an action is executing asynchronously.
 
 ---
 
-## Safety pipeline (8 gates)
+## Safety pipeline (9 gates)
 
 Every proposed action passes all gates sequentially before touching the cluster:
 
 | # | Gate | Blocks when |
 |---|---|---|
+| 0 | **Anomaly gate** | z-score < 2.0 vs 7-day baseline — error rate is statistically routine |
 | 1 | Causality | Root cause not evidenced in logs |
 | 2 | Decision policy | Action type not allowed for `(error_type, severity, confidence)` |
 | 3 | Loop detector | ≥5 consecutive unresolved actions → service frozen |
@@ -207,6 +231,10 @@ Every proposed action passes all gates sequentially before touching the cluster:
 | 6 | Severity gate | Destructive action on low severity or low confidence |
 | 7 | Rate limit | >3 restarts for this service in 10 minutes |
 | 8 | Action budget | >5 automated actions across all services in 1 hour |
+
+Gate 0 only fires once the service has ≥5 baseline samples (7-day rolling window
+updated nightly). A new service bypasses the anomaly gate until enough history
+accumulates. The `anomaly_score` z-score is included in every `AnalysisResult`.
 
 Failures are downgraded to `notify` and recorded in the incident audit log.
 
@@ -258,7 +286,7 @@ bash scripts/e2e_teardown.sh   # cleanup
 # Unit + integration tests (no cluster, no real LLM)
 cd agent-backend
 pytest tests/ --ignore=tests/e2e --ignore=tests/test_integration_llm.py -q
-# 340 tests pass
+# 449 tests pass
 
 # Sample-app tests
 cd sample-app && pytest test_app.py -q
@@ -270,7 +298,55 @@ GOOGLE_API_KEYS="AIza..." pytest agent-backend/tests/test_integration_llm.py -v 
 # End-to-end against kind cluster
 bash scripts/e2e_setup.sh
 pytest agent-backend/tests/e2e/ -v -s
+
+# Offline eval suite (20 hand-authored scenarios)
+bash scripts/run_evals.sh
+# Expected: ≥70% root-cause accuracy, ≥80% action correctness, ≤20% false-positive rate
+
+# Generate 80 parameterized variants and run all 100
+bash scripts/run_evals.sh --generated
 ```
+
+---
+
+## Observability
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /dashboard` | HTML table of the last 50 incidents with service/outcome filters |
+| `GET /api/v1/incidents/{id}/timeline` | Chronological events: error spike → analysis → tool calls → safety → action → impact |
+| `GET /api/v1/metrics` | JSON: fix rate, false-positive rate, MTTR p50/p95, safety denials, frozen services |
+| `GET /metrics` | Prometheus text format — scrape with any standard collector |
+
+Prometheus metrics exported:
+- `agent_analysis_total{service,outcome}` — incidents processed
+- `agent_analysis_duration_seconds` — end-to-end latency histogram
+- `agent_llm_call_total{provider,model,result}` — LLM call outcomes
+- `agent_llm_call_duration_seconds{provider}` — LLM latency
+- `agent_safety_denials_total{reason}` — which gate is blocking most often
+- `agent_actions_executed_total{action_type,status}` — remediation outcomes
+
+---
+
+## Trust & empirical validation
+
+The system's decision path has two independent layers to prevent hallucinated actions:
+
+**Cross-model voting (Phase 9d):** For destructive actions (`restart_pod`, `rollback`,
+`scale_up`) on `high`/`critical` severity incidents, a second LLM is consulted.
+If the two models propose different actions, the result is downgraded to `notify`
+and the disagreement is recorded in `cross_validation` in the response.
+
+**Statistical anomaly baseline (Phase 9e):** Each service maintains a rolling 7-day
+baseline of error ratio in Elasticsearch (`devops-baselines` index). The anomaly
+gate (gate #0) computes a z-score on each analysis. If z < 2.0 the error rate is
+not statistically anomalous — destructive actions are blocked regardless of what
+the LLM proposes. Baselines are refreshed nightly by a background sweeper. A
+service with fewer than 5 baseline samples bypasses the gate.
+
+**Offline eval suite:** 20 hand-authored scenarios covering all major failure
+archetypes (OOM, CrashLoop, dependency errors, build failures, and healthy traffic
+that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 
 ---
 
@@ -290,16 +366,22 @@ pytest agent-backend/tests/e2e/ -v -s
 ├── agent-backend/
 │   ├── app/
 │   │   ├── api/            routes, auth (API-key guard)
-│   │   ├── core/           agent, safety (8 gates), decision, causality,
-│   │   │                   confidence, loop_detector, rollback,
-│   │   │                   action_executor, impact, policy, audit
-│   │   ├── llm/            client (multi-provider), tools (3 tools),
-│   │   │                   prompt, sanitize (injection defence)
+│   │   ├── core/           agent, safety (9 gates), decision, causality,
+│   │   │                   confidence, loop_detector, rollback, anomaly,
+│   │   │                   action_executor, impact, policy, audit, metrics_builder
+│   │   ├── llm/            client (multi-provider + cross-model voting),
+│   │   │                   tools (3 tools), prompt, sanitize (injection defence)
 │   │   ├── log_processor/  summarizer, parser, classifier, extractor
+│   │   ├── api/v1/         dashboard (HTML), routes, auth
 │   │   └── services/       elk_service, memory_store (leases, ILM)
-│   ├── tests/              340 tests; e2e/ auto-skips without cluster
+│   ├── tests/              449 tests; e2e/ auto-skips without cluster
 │   └── policy.yaml         live-editable safety policy
 ├── sample-app/             FastAPI app with injectable failure endpoints
+├── evals/
+│   ├── incidents/          20 hand-authored eval fixture archetypes
+│   ├── generated/          80 parameterised variants (git-ignored)
+│   ├── results/            timestamped JSON eval reports
+│   └── run_evals.py        offline eval harness
 ├── elk/
 │   ├── logstash.conf       JSON parse + ES output
 │   ├── filebeat.yml        reads /app/logs/app.log
@@ -316,6 +398,8 @@ pytest agent-backend/tests/e2e/ -v -s
 ├── scripts/
 │   ├── simulate_failure.sh
 │   ├── e2e_setup.sh
-│   └── e2e_teardown.sh
+│   ├── e2e_teardown.sh
+│   ├── gen_eval_fixtures.py   parameterised variant generator
+│   └── run_evals.sh           eval suite runner
 └── docker-compose.yml
 ```

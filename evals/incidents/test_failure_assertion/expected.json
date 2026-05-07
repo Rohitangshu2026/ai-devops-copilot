@@ -1,0 +1,8 @@
+{
+  "error_type": "test_failure",
+  "severity": "medium",
+  "correct_action": "notify",
+  "should_act": true,
+  "root_cause_keywords": ["AssertionError", "test_pricing", "compound discount", "assertion error", "test failed"],
+  "description": "Two unit tests in test_pricing.py failed with assertion errors on the compound discount calculation logic. The production app is not affected (this is a pre-merge test run), but the developer must fix the discount engine logic before merging."
+}

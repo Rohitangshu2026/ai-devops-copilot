@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "critical",
+  "correct_action": "restart_pod",
+  "should_act": true,
+  "root_cause_keywords": ["CrashLoopBackOff", "config parse", "yaml", "mapping values"],
+  "description": "Pod is stuck in CrashLoopBackOff because a malformed ConfigMap (invalid YAML on line 14) prevents the application from starting. The config must be fixed before restarting; restarting without fixing config will not resolve the loop."
+}

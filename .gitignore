@@ -11,3 +11,5 @@ sample-app/logs/
 .worktrees/
 .claude/
 builds/
+evals/generated/
+evals/results/

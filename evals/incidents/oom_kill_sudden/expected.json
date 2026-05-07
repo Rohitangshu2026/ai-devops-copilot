@@ -1,0 +1,8 @@
+{
+  "error_type": "runtime_crash",
+  "severity": "critical",
+  "correct_action": "restart_pod",
+  "should_act": true,
+  "root_cause_keywords": ["OOMKilled", "memory limit", "exit code 137"],
+  "description": "Container was abruptly killed by the OOM killer after a burst of memory-intensive report generation requests exhausted the 2Gi memory limit. Pod must be restarted and memory limits reviewed."
+}
