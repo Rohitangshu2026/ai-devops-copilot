@@ -117,7 +117,7 @@ deploy:
   before_script:
     # Shell executor runs directly on the Mac — kubectl and ~/.kube/config
     # already exist from Minikube. Verify the cluster is up before deploying.
-    - minikube status || minikube start
+    - /usr/local/bin/minikube status || /usr/local/bin/minikube start
     - kubectl cluster-info
   script:
     - cd ansible

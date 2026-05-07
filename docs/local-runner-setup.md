@@ -102,6 +102,23 @@ which minikube  # /usr/local/bin/minikube
 brew install ansible
 ```
 
+**Note on minikube PATH:** The shell executor may not inherit your login shell's
+PATH. If the deploy job fails with `minikube: command not found`, add the
+following to `~/.bash_profile` or `~/.zprofile`:
+
+```bash
+export PATH="/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:$PATH"
+```
+
+Then restart the runner:
+```bash
+brew services restart gitlab-runner
+```
+
+Alternatively, the `.gitlab-ci.yml` deploy job uses full paths (`/usr/local/bin/minikube`)
+to avoid this dependency entirely.
+
 ### 6. Start Minikube (if not already running)
 
 ```bash
