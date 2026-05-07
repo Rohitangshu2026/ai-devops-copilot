@@ -1,0 +1,5 @@
+---
+# ELK Stack defaults
+namespace: default
+kubectl_timeout: "300s"
+import_kibana_dashboard: true

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: AI DevOps Copilot
+  description: Deploy ELK Stack (Elasticsearch + Logstash + Kibana + Filebeat) on Kubernetes
+  license: MIT
+  min_ansible_version: "2.10"
+dependencies: []
