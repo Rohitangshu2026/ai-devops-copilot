@@ -47,7 +47,7 @@ run-evals:
     - cd agent-backend
     - pip install --quiet -r requirements.txt
     - cd ..
-    - python evals/run_evals.py --scenarios evals/incidents/
+    - python evals/run_evals.py --suite incidents
   artifacts:
     when: always
     paths:

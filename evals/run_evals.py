@@ -125,6 +125,12 @@ async def _run_scenario(scenario_dir: Path, verbose: bool = False) -> dict[str, 
     t0 = time.monotonic()
 
     try:
+        # Pre-import modules so patch() can find them as attributes.
+        import app.services.elk_service  # noqa: F401
+        import app.services.memory_store  # noqa: F401
+        import app.core.action_executor   # noqa: F401
+        import app.core.impact            # noqa: F401
+
         # Patch ES client and LLM so only the pipeline logic runs.
         # The LLM is replaced with a fixture-driven stub that returns the expected action,
         # allowing us to test the pipeline's handling (causality, safety, confidence)
