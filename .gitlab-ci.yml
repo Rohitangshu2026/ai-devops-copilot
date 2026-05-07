@@ -1,5 +1,6 @@
 stages:
   - test
+  - evals
   - build
   - push
   - deploy
@@ -27,6 +28,32 @@ test-agent-backend:
     - cd agent-backend
     - pip install --quiet -r requirements.txt
     - pytest tests/ --ignore=tests/e2e --ignore=tests/test_integration_llm.py -q
+
+# ── Eval suite (Phase 9 — fixture-based accuracy gate) ───────────────────────
+# Runs the 20-scenario eval suite against mock ES+LLM.
+# Fails the pipeline if accuracy gates are not met.
+# Required CI variables:
+#   none — evals use mocked providers and do not call real LLM APIs
+#
+# To enable cross-model voting tests with real APIs, add:
+#   ANTHROPIC_API_KEYS  (optional)
+#   GOOGLE_API_KEYS     (optional)
+
+run-evals:
+  stage: evals
+  image: python:3.11-slim
+  needs: [test-agent-backend]
+  script:
+    - cd agent-backend
+    - pip install --quiet -r requirements.txt
+    - cd ..
+    - python evals/run_evals.py --scenarios evals/incidents/
+  artifacts:
+    when: always
+    paths:
+      - evals/results/
+    expire_in: 7 days
+  allow_failure: false   # eval gate blocks build on accuracy regression
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
@@ -102,8 +129,15 @@ push-agent-backend:
 # One-time setup: see docs/local-runner-setup.md
 #
 # Required CI variables (Settings → CI/CD → Variables):
-#   DOCKER_USERNAME   DockerHub username
-#   DOCKER_PASSWORD   DockerHub password / access token  ← mark as Masked
+#   DOCKER_USERNAME         DockerHub username
+#   DOCKER_PASSWORD         DockerHub password / access token  ← mark as Masked
+#   LLM_API_KEY             Primary LLM API key (injected into Vault by Ansible)
+#   GOOGLE_API_KEYS         Google/Gemini API keys
+#   ANTHROPIC_API_KEYS      Anthropic Claude API keys
+#   OPENAI_API_KEYS         OpenAI API keys (optional)
+#   VAULT_ROOT_TOKEN        HashiCorp Vault root token (used by vault_secrets role)
+#   SLACK_WEBHOOK_URL       (optional) Slack incoming webhook for approval alerts
+#   APPROVAL_SECRET_KEY     HMAC signing key for approval tokens  ← mark as Masked
 
 deploy:
   stage: deploy
@@ -134,10 +168,13 @@ deploy:
     - ansible-playbook -i inventory.ini deploy.yml
       -e "sample_app_image=$SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA"
       -e "agent_image=$AGENT_IMAGE:$CI_COMMIT_SHORT_SHA"
+      -e "vault_root_token=${VAULT_ROOT_TOKEN:-devops-copilot-root-token}"
       -e "llm_api_key=${LLM_API_KEY:-}"
       -e "google_api_keys=${GOOGLE_API_KEYS:-}"
       -e "anthropic_api_keys=${ANTHROPIC_API_KEYS:-}"
       -e "openai_api_keys=${OPENAI_API_KEYS:-}"
+      -e "slack_webhook_url=${SLACK_WEBHOOK_URL:-}"
+      -e "approval_secret_key=${APPROVAL_SECRET_KEY:-change-me}"
   environment:
     name: production
     url: http://localhost:8001

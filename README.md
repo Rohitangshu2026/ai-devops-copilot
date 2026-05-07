@@ -80,11 +80,12 @@ automatically imported by the `kibana-setup` container on first start.
 | Layer | Tools |
 |---|---|
 | Version control | Git + GitLab |
-| CI/CD | GitLab CI (test → build → push → deploy) |
+| CI/CD | GitLab CI (test → evals → build → push → deploy) |
 | Containerisation | Docker + Docker Compose |
-| Configuration management | Ansible (role: `app_deploy`) |
-| Orchestration | Kubernetes + HPA (1–5 replicas, CPU 70%) |
+| Configuration management | Ansible (roles: `vault_secrets`, `app_deploy`) |
+| Orchestration | Kubernetes + HPA (1–3 replicas, CPU 70% / Memory 80%) |
 | Log pipeline | Filebeat → Logstash → Elasticsearch → Kibana |
+| Secret management | HashiCorp Vault (KV v2, dev mode in k8s) |
 | LLM providers | Google Gemini / Anthropic Claude / OpenAI (configurable fallback chain) |
 
 ---
@@ -128,6 +129,13 @@ remote machine. A shell-executor runner registered on the same Mac runs
 |---|---|
 | `DOCKER_USERNAME` | DockerHub username |
 | `DOCKER_PASSWORD` | DockerHub password or access token *(mark as Masked)* |
+| `LLM_API_KEY` | Primary LLM API key — injected into Vault by `vault_secrets` role |
+| `GOOGLE_API_KEYS` | Google Gemini API keys (comma-separated) |
+| `ANTHROPIC_API_KEYS` | Anthropic Claude API keys |
+| `OPENAI_API_KEYS` | OpenAI API keys (optional) |
+| `VAULT_ROOT_TOKEN` | HashiCorp Vault root token *(Masked)* — defaults to `devops-copilot-root-token` |
+| `SLACK_WEBHOOK_URL` | (optional) Slack incoming webhook for approval alerts |
+| `APPROVAL_SECRET_KEY` | HMAC-SHA256 key for approval tokens *(Masked)* |
 
 `KUBECONFIG_CONTENT` is **not needed** — the shell executor on your Mac uses
 `~/.kube/config` directly.
@@ -151,7 +159,153 @@ OPENAI_API_KEYS=key1,key2
 # Admin API key — protects /admin/* and /services/*/unfreeze endpoints
 # Leave blank to disable auth in local dev mode
 ADMIN_API_KEY=
+
+# Phase 11d — Human approval workflow
+APPROVAL_SECRET_KEY=change-me-in-production   # HMAC-SHA256 key for approval tokens
+APPROVAL_EXPIRY_SECONDS=300                    # Token expiry (default: 5 min)
+SLACK_WEBHOOK_URL=                             # Slack Block Kit notifications (optional)
+
+# Phase 10 — HashiCorp Vault (auto-configured in k8s; not needed in docker-compose)
+VAULT_ADDR=http://vault:8200
+VAULT_TOKEN=devops-copilot-root-token
 ```
+
+---
+
+## HashiCorp Vault (Phase 10)
+
+In Kubernetes, LLM API keys are stored in Vault instead of plain environment
+variables.  The Ansible `vault_secrets` role provisions Vault on first deploy:
+
+1. Deploys `k8s/vault.yaml` (Vault pod in dev mode — for dev/demo clusters)
+2. Enables KV v2 secrets engine at `secret/`
+3. Writes `LLM_API_KEY`, `GOOGLE_API_KEYS`, `ANTHROPIC_API_KEYS`, `OPENAI_API_KEYS`,
+   `LLM_MODEL` to `secret/data/llm-credentials`
+
+The `agent-backend` reads secrets at startup from Vault via `app/utils/vault_client.py`.
+If Vault is unreachable (docker-compose mode), it falls back to environment variables.
+
+```bash
+# Verify secrets after deploy
+kubectl exec -it vault-0 -n devops-copilot -- vault kv get secret/llm-credentials
+```
+
+---
+
+## Blast-radius estimation (Phase 10)
+
+Every analysis computes how many services would be affected if the proposed
+action is executed:
+
+```json
+"blast_radius": {
+  "score": "high",
+  "affected_count": 4,
+  "affected_services": ["api-gateway", "auth-service", "payment-api", "sample-app"],
+  "direct_dependents": ["api-gateway"],
+  "source": "k8s_annotations"
+}
+```
+
+Blast radius is computed by BFS on the **reverse** dependency graph built from
+`devops-copilot/depends-on` annotations on Deployments (cached 60s; falls back
+to the static map in `causality.py`).
+
+Scores: `0 affected → low` · `1–2 → medium` · `3–5 → high` · `>5 → critical`
+
+The safety gate (gate 6b) tightens requirements based on blast radius:
+
+| Blast radius | Required confidence | Required severity |
+|---|---|---|
+| `critical` | `high` | `critical` |
+| `high` | `high` | `high` |
+| `medium` | `medium` | `high` |
+| `low` | (no change) | (no change) |
+
+---
+
+## Human approval workflow (Phase 11)
+
+High-impact actions are gated behind human approval before execution.
+
+### When approval is required
+
+Any of:
+- Service has `devops-copilot/criticality: critical` annotation
+- Action type is `rollback`
+- Blast-radius score is `high` or `critical`
+- Destructive action with confidence < `high`
+
+### Approval flow
+
+```
+analyze() called
+    │
+    ├── safety gates pass → requires_approval() check
+    │       │
+    │       ├── approval required → create ApprovalRequest → send Slack notification
+    │       │       │
+    │       │       └── action_state: "awaiting_approval"
+    │       │
+    │       └── no approval required → execute immediately
+    │
+    └── Operator clicks Approve (or Reject) in Slack / calls API
+            │
+            └── POST /api/v1/approvals/{id}/approve?token=<hmac>
+                    │
+                    └── token verified → action_state: "approved" → execute
+```
+
+Approval tokens are HMAC-SHA256 signed (`APPROVAL_SECRET_KEY`).  Forged or
+expired tokens return 403.  The token is embedded in the Slack button URLs.
+
+### Slack notification
+
+When `SLACK_WEBHOOK_URL` is set, approval-required incidents send a Block Kit
+message:
+
+```
+⚠️  Approval Required — restart_pod sample-app
+Service: sample-app    Action: restart_pod
+Blast Radius: high     Confidence: 8/10
+Reason: destructive action on blast-radius=high service
+Confidence breakdown:
+  • +2 error_type=runtime_crash (known type)
+  • +2 severity=high
+  ...
+[✅ Approve]   [❌ Reject]
+```
+
+Unset `SLACK_WEBHOOK_URL` → feature is a no-op and actions execute directly
+(`dev`-mode behaviour unchanged).
+
+---
+
+## Pipeline failure webhook (Phase 11)
+
+Register `POST /api/v1/webhook/pipeline-failure` as a webhook in GitLab
+(Settings → Webhooks → Pipeline events) or GitHub Actions (repository dispatch):
+
+```bash
+# GitLab CI — set in Settings → Webhooks
+URL: http://<agent-backend-host>:8001/api/v1/webhook/pipeline-failure
+Trigger: Pipeline events
+
+# Test manually
+curl -s -X POST http://localhost:8001/api/v1/webhook/pipeline-failure \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "object_kind": "pipeline",
+    "object_attributes": {"status": "failed"},
+    "project": {"name": "sample-app"},
+    "commit": {"id": "abc12345"},
+    "builds": []
+  }' | jq
+```
+
+On receipt, the webhook extracts the failing service name from the payload
+and fires an analysis in the background (non-blocking — the webhook responds
+in <1s).  Results appear in the audit dashboard and `GET /api/v1/metrics`.
 
 ---
 
@@ -167,6 +321,10 @@ ADMIN_API_KEY=
 | `GET` | `/dashboard` | — | HTML incident dashboard (last 50 incidents) |
 | `POST` | `/api/v1/services/{service}/unfreeze` | Admin key | Clear a frozen service |
 | `POST` | `/api/v1/admin/reload-policy` | Admin key | Hot-reload `policy.yaml` |
+| `POST` | `/api/v1/webhook/pipeline-failure` | — | GitLab CI / GitHub Actions failure webhook |
+| `GET` | `/api/v1/approvals/{id}` | — | Get pending approval request status |
+| `POST` | `/api/v1/approvals/{id}/approve` | Signed token | Approve a high-impact action |
+| `POST` | `/api/v1/approvals/{id}/reject` | Signed token | Reject a high-impact action |
 | `GET` | `/health` | — | Liveness check |
 
 Admin endpoints require the `X-Admin-Key: <value>` header when `ADMIN_API_KEY`
@@ -286,7 +444,7 @@ bash scripts/e2e_teardown.sh   # cleanup
 # Unit + integration tests (no cluster, no real LLM)
 cd agent-backend
 pytest tests/ --ignore=tests/e2e --ignore=tests/test_integration_llm.py -q
-# 449 tests pass
+# 544 tests pass
 
 # Sample-app tests
 cd sample-app && pytest test_app.py -q
@@ -368,13 +526,15 @@ that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 │   │   ├── api/            routes, auth (API-key guard)
 │   │   ├── core/           agent, safety (9 gates), decision, causality,
 │   │   │                   confidence, loop_detector, rollback, anomaly,
-│   │   │                   action_executor, impact, policy, audit, metrics_builder
+│   │   │                   blast_radius, approval, action_executor,
+│   │   │                   impact, policy, audit, metrics_builder
 │   │   ├── llm/            client (multi-provider + cross-model voting),
 │   │   │                   tools (3 tools), prompt, sanitize (injection defence)
 │   │   ├── log_processor/  summarizer, parser, classifier, extractor
-│   │   ├── api/v1/         dashboard (HTML), routes, auth
+│   │   ├── api/v1/         dashboard (HTML), routes, webhooks, auth
+│   │   ├── integrations/   slack (Block Kit approval notifications)
 │   │   └── services/       elk_service, memory_store (leases, ILM)
-│   ├── tests/              449 tests; e2e/ auto-skips without cluster
+│   ├── tests/              544 tests; e2e/ auto-skips without cluster
 │   └── policy.yaml         live-editable safety policy
 ├── sample-app/             FastAPI app with injectable failure endpoints
 ├── evals/
@@ -387,14 +547,21 @@ that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 │   ├── filebeat.yml        reads /app/logs/app.log
 │   └── kibana-dashboard.ndjson   auto-imported dashboard
 ├── k8s/
-│   ├── deployment.yaml     sample-app Deployment (RollingUpdate)
-│   ├── agent-backend.yaml  agent-backend Deployment + Service
-│   ├── service.yaml        sample-app NodePort
-│   ├── hpa.yaml            HPA 1–5 replicas CPU/memory
-│   └── test/               ephemeral kind cluster manifests
+│   ├── deployment.yaml         sample-app Deployment (RollingUpdate)
+│   ├── agent-backend.yaml      agent-backend Deployment + Service + criticality annotation
+│   ├── service.yaml            sample-app NodePort
+│   ├── hpa.yaml                HPA 1–5 replicas CPU/memory (sample-app)
+│   ├── hpa-agent-backend.yaml  HPA 1–3 replicas CPU 70% / Memory 80%
+│   ├── vault.yaml              HashiCorp Vault (dev mode) Deployment + Service
+│   ├── rbac.yaml               ServiceAccount + ClusterRole for agent-backend
+│   ├── networkpolicy.yaml      In-cluster-only access for agent-backend
+│   ├── namespace.yaml          devops-copilot Namespace
+│   └── test/                   ephemeral kind cluster manifests
 ├── ansible/
 │   ├── deploy.yml
-│   └── roles/app_deploy/   tasks, handlers, defaults
+│   └── roles/
+│       ├── vault_secrets/      Vault provisioning + secret injection
+│       └── app_deploy/         tasks, handlers, defaults
 ├── scripts/
 │   ├── simulate_failure.sh
 │   ├── e2e_setup.sh
