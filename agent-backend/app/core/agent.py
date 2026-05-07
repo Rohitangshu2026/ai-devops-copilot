@@ -39,7 +39,9 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     error_type = detect_error_type(relevant)
     key_events = extract_key_events(relevant)
     severity = classify_severity(relevant, error_type)
-    confidence_hint, confidence_score = score_confidence(summary, error_type, severity)
+    confidence_hint, confidence_score, confidence_breakdown = score_confidence(
+        summary, error_type, severity
+    )
 
     raw_evidence = [str(l.get("message", l)) for l in relevant]
 
@@ -129,6 +131,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         confidence_hint=confidence_hint,
         confidence_score=confidence_score,
         confidence_source="signal",
+        confidence_breakdown=confidence_breakdown,
         parsed_log=ParsedLog(
             error_type=error_type,
             severity=severity,

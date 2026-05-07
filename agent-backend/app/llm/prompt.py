@@ -1,6 +1,7 @@
 import json
 from dataclasses import asdict
 
+from app.llm.sanitize import PROMPT_PREAMBLE, sanitize_events
 from app.log_processor.summarizer import LogSummary
 
 SYSTEM_PROMPT = """\
@@ -52,16 +53,25 @@ def build_user_prompt(
     summary: LogSummary,
     strict: bool = False,
 ) -> str:
+    # Phase 6d — sanitize untrusted log content before interpolation.
+    # Each event becomes <log>...</log> with control chars stripped and
+    # known jailbreak phrases replaced by [FILTERED].
+    safe_events = sanitize_events([str(e) for e in key_events]) if key_events else []
     summary_dict = asdict(summary)
+    # Sanitize free-text fields in the summary that originate from logs.
+    if "deduplicated_events" in summary_dict and isinstance(summary_dict["deduplicated_events"], list):
+        summary_dict["deduplicated_events"] = sanitize_events(
+            [str(e) for e in summary_dict["deduplicated_events"]]
+        )
     payload = {
         "service": service,
         "environment": environment,
         "error_type": error_type,
         "severity": severity,
-        "key_events": key_events,
+        "key_events": safe_events,
         "log_summary": summary_dict,
     }
-    events_str = "\n".join(f"- {e}" for e in key_events) if key_events else "- (none)"
+    events_str = "\n".join(f"- {e}" for e in safe_events) if safe_events else "- (none)"
     prefix = (
         "WARNING: Your previous response did not match the required schema. "
         "Return ONLY valid JSON — no text, no markdown, no explanations.\n\n"
@@ -69,6 +79,7 @@ def build_user_prompt(
     )
     return (
         f"{prefix}"
+        f"{PROMPT_PREAMBLE}\n\n"
         f"Analyze this incident and return JSON.\n\n"
         f"Key events YOU MUST reference in root_causes:\n{events_str}\n\n"
         f"Full incident data:\n{json.dumps(payload, indent=2)}"

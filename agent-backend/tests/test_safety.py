@@ -167,10 +167,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_ok()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -195,10 +197,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_ok()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -236,10 +240,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_ok()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -264,10 +270,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_ok()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -291,10 +299,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_escalate()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -317,10 +327,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_freeze()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",
@@ -344,10 +356,12 @@ class TestSafetyController:
             patch("app.core.safety.check_loop", new_callable=AsyncMock) as mock_loop,
             patch("app.core.safety.find_recent_actions", new_callable=AsyncMock) as mock_recent,
             patch("app.core.safety.count_unresolved_actions", new_callable=AsyncMock) as mock_count,
+            patch("app.core.safety.try_acquire_action_lock", new_callable=AsyncMock) as mock_lock,
         ):
             mock_loop.return_value = _loop_ok()
             mock_recent.return_value = []
             mock_count.return_value = 0
+            mock_lock.return_value = True
 
             result = await safety_validate(
                 service="my-service",

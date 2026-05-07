@@ -1,0 +1,93 @@
+# AI DevOps Copilot — policy configuration
+#
+# This file controls every tunable safety threshold and action rule.
+# Loaded at agent-backend startup; reloadable on SIGHUP.
+#
+# Schema validation runs at startup — invalid values prevent the pod from
+# starting (fail fast rather than fail at runtime).
+
+# ── Per-action policies ───────────────────────────────────────────────────────
+# Each action declares:
+#   min_confidence:     low | medium | high
+#   allowed_severities: subset of [low, medium, high, critical]
+#   deny_namespaces:    list of namespaces where the action is forbidden
+#   max_per_service_per_10min: rate limit (0 = unlimited)
+#   require_snapshot:   true → action requires a captured rollback snapshot
+actions:
+  restart_pod:
+    min_confidence: medium
+    allowed_severities: [high, critical]
+    deny_namespaces: [kube-system, monitoring, kube-public]
+    max_per_service_per_10min: 3
+    require_snapshot: true
+
+  rollback:
+    min_confidence: high
+    allowed_severities: [high, critical]
+    deny_namespaces: [kube-system, monitoring, kube-public]
+    max_per_service_per_10min: 1
+    require_snapshot: true
+
+  scale_up:
+    min_confidence: medium
+    allowed_severities: [high, critical]
+    deny_namespaces: [kube-system, monitoring, kube-public]
+    max_per_service_per_10min: 5
+    require_snapshot: false
+
+  trigger_retry:
+    min_confidence: medium
+    allowed_severities: [medium, high, critical]
+    deny_namespaces: []
+    max_per_service_per_10min: 5
+    require_snapshot: false
+
+  notify:
+    min_confidence: low
+    allowed_severities: [low, medium, high, critical]
+    deny_namespaces: []
+    max_per_service_per_10min: 0    # unlimited
+    require_snapshot: false
+
+  no_action:
+    min_confidence: low
+    allowed_severities: [low, medium, high, critical]
+    deny_namespaces: []
+    max_per_service_per_10min: 0
+    require_snapshot: false
+
+# ── Decision policy table ─────────────────────────────────────────────────────
+# Maps (error_type, severity, confidence) → list of allowed actions.
+# Checked in order; first match wins. "*" matches any value.
+decision_table:
+  - match: [runtime_crash, critical, high]
+    allowed: [restart_pod, rollback]
+  - match: [runtime_crash, high, high]
+    allowed: [restart_pod]
+  - match: [runtime_crash, high, medium]
+    allowed: [notify]
+  - match: [runtime_crash, medium, "*"]
+    allowed: [notify, no_action]
+  - match: [build_failure, high, high]
+    allowed: [trigger_retry]
+  - match: [build_failure, "*", "*"]
+    allowed: [notify, no_action]
+  - match: [dependency_error, "*", "*"]
+    allowed: [notify, no_action]
+  - match: [test_failure, "*", "*"]
+    allowed: [notify, no_action]
+  - match: [unknown, "*", "*"]
+    allowed: [no_action]
+  - match: ["*", "*", "*"]              # global fallback
+    allowed: [notify, no_action]
+
+# ── Global thresholds ─────────────────────────────────────────────────────────
+global:
+  action_budget_per_hour: 5             # across all services
+  loop_freeze_threshold: 5              # consecutive unresolved → indefinite freeze
+  loop_escalate_threshold: 3            # consecutive unresolved → escalate to notify
+  approval_expiry_seconds: 300          # human-approval token TTL
+  idempotency_window_seconds: 120
+  lease_ttl_seconds: 60                 # execution lease TTL
+  lease_renewal_seconds: 20             # renew at this interval
+  protected_namespaces: [kube-system, monitoring, kube-public]

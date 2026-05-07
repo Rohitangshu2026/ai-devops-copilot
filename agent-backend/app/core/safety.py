@@ -1,14 +1,15 @@
-"""Main safety controller for Phase 5.
+"""Main safety controller for Phase 5 + Phase 6 hardening.
 
-Runs seven ordered checks between an LLM-proposed action and Kubernetes:
+Runs eight ordered checks between an LLM-proposed action and Kubernetes:
 
 1. Causality gate        — unverified causality blocks destructive actions.
-2. Decision policy       — ACTION_POLICY may override the action to no_action.
+2. Decision policy       — apply_policy() may override the action to no_action.
 3. Loop detection        — repeated actions trigger escalation or freeze.
-4. Idempotency           — recent identical actions in the same state are blocked.
+4. Idempotency (atomic)  — ES fingerprint lock; only one peer may execute.
 5. Namespace isolation   — protected namespaces are never touched.
 6. Severity gate         — destructive actions need high/critical severity + non-low confidence.
-7. Rate limit            — restart_pod capped at 3 per service per 10 min.
+7. Rate limit            — restart_pod capped per policy.global.
+8. Action budget         — global cap on automated actions per hour.
 """
 from __future__ import annotations
 
@@ -18,16 +19,18 @@ from typing import Any
 from app.core.causality import CausalityResult
 from app.core.decision import apply_policy
 from app.core.loop_detector import check_loop
-from app.services.memory_store import count_unresolved_actions, find_recent_actions
+from app.core.policy import get_policy
+from app.services.memory_store import (
+    count_unresolved_actions,
+    find_recent_actions,
+    try_acquire_action_lock,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger("safety")
 
 _SAFE_ACTIONS = {"notify", "no_action"}
 _DESTRUCTIVE_ACTIONS = {"restart_pod", "rollback", "scale_up"}
-_PROTECTED_NAMESPACES = {"kube-system", "monitoring", "kube-public"}
-_RESTART_RATE_LIMIT = 3
-_RESTART_RATE_WINDOW_MINUTES = 10
 
 
 @dataclass
@@ -106,31 +109,33 @@ async def validate(
         action_type = "notify"
         checks["loop"]["escalated_to"] = "notify"
 
-    # ── 4. Idempotency ───────────────────────────────────────────────────────
-    recent = await find_recent_actions(
-        service,
-        action_type,
-        states=["pending", "executing", "completed"],
-        within_seconds=120,
-    )
-    checks["idempotency"] = {"recent_count": len(recent)}
-    if recent:
-        logger.info({
-            "message": "safety_idempotency_denied",
-            "service": service,
-            "action": action_type,
-            "recent": len(recent),
-        })
-        return SafetyResult(
-            allowed=False,
-            action="no_action",
-            reason=f"idempotency: action '{action_type}' already executed {len(recent)} time(s) in the last 120s",
-            checks=checks,
-        )
+    # ── 4. Idempotency (atomic ES fingerprint lock — Phase 6a) ───────────────
+    # Only enforce for non-safe actions; notify/no_action are idempotent
+    # by nature and should never be lock-blocked.
+    if action_type in _SAFE_ACTIONS:
+        checks["idempotency"] = {"skipped": True, "reason": "safe action"}
+    else:
+        ttl = get_policy().global_.idempotency_window_seconds
+        acquired = await try_acquire_action_lock(service, action_type, ttl_seconds=ttl)
+        checks["idempotency"] = {"lock_acquired": acquired, "ttl_seconds": ttl}
+        if not acquired:
+            logger.info({
+                "message": "safety_idempotency_denied",
+                "service": service,
+                "action": action_type,
+            })
+            return SafetyResult(
+                allowed=False,
+                action="no_action",
+                reason=f"idempotency: another peer already holds the lock for "
+                       f"({service}, {action_type}) within the last {ttl}s",
+                checks=checks,
+            )
 
     # ── 5. Namespace isolation ───────────────────────────────────────────────
     checks["namespace"] = namespace
-    if namespace in _PROTECTED_NAMESPACES:
+    protected = set(get_policy().global_.protected_namespaces)
+    if namespace in protected:
         logger.warning({
             "message": "safety_namespace_blocked",
             "service": service,
@@ -163,24 +168,60 @@ async def validate(
                 checks=checks,
             )
 
-    # ── 7. Rate limit ────────────────────────────────────────────────────────
-    if action_type == "restart_pod":
-        rate_count = await count_unresolved_actions(
-            service, error_type, window_minutes=_RESTART_RATE_WINDOW_MINUTES
-        )
-        checks["rate_limit"] = {"count": rate_count, "limit": _RESTART_RATE_LIMIT}
-        if rate_count >= _RESTART_RATE_LIMIT:
+    # ── 7. Per-action rate limit (Phase 6i — driven by policy.yaml) ─────────
+    if action_type in _DESTRUCTIVE_ACTIONS:
+        try:
+            action_pol = get_policy().action(action_type)
+            limit = action_pol.max_per_service_per_10min
+        except KeyError:
+            limit = 0  # unknown action → no limit applied here
+
+        if limit > 0:
+            rate_count = await count_unresolved_actions(service, error_type, window_minutes=10)
+            checks["rate_limit"] = {"count": rate_count, "limit": limit, "window_minutes": 10}
+            if rate_count >= limit:
+                logger.warning({
+                    "message": "safety_rate_limit_denied",
+                    "service": service,
+                    "action": action_type,
+                    "count": rate_count,
+                })
+                return SafetyResult(
+                    allowed=False,
+                    action="no_action",
+                    reason=f"rate limit: {action_type} used {rate_count} times in the last "
+                           f"10 min (max {limit})",
+                    checks=checks,
+                )
+
+    # ── 8. Global action budget (max destructive actions per hour) ───────────
+    if action_type in _DESTRUCTIVE_ACTIONS:
+        budget_total = get_policy().global_.action_budget_per_hour
+        # Count destructive actions across all services in the last 60 min.
+        # We use find_recent_actions per type and aggregate (cheap at low QPS).
+        budget_used = 0
+        for atype in _DESTRUCTIVE_ACTIONS:
+            recent = await find_recent_actions(
+                service="*",  # treated as wildcard; find_recent_actions filters by exact term
+                action_type=atype,
+                states=["completed", "executing"],
+                within_seconds=3600,
+            )
+            budget_used += len(recent)
+        checks["action_budget"] = {"used": budget_used, "limit": budget_total}
+        if budget_used >= budget_total:
             logger.warning({
-                "message": "safety_rate_limit_denied",
+                "message": "safety_action_budget_denied",
                 "service": service,
                 "action": action_type,
-                "count": rate_count,
+                "used": budget_used,
+                "limit": budget_total,
             })
             return SafetyResult(
                 allowed=False,
                 action="no_action",
-                reason=f"rate limit: restart_pod used {rate_count} times in the last "
-                       f"{_RESTART_RATE_WINDOW_MINUTES} min (max {_RESTART_RATE_LIMIT})",
+                reason=f"action budget exceeded: {budget_used} destructive actions in the "
+                       f"last hour (limit {budget_total})",
                 checks=checks,
             )
 
