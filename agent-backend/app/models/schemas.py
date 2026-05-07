@@ -59,3 +59,8 @@ class AnalysisResult(BaseModel):
     safety_checks: Optional[Dict[str, Any]] = None
     incident_id: Optional[str] = None
     execution_result: Optional[Dict[str, Any]] = None
+    # Phase 8e — temporal incident chain
+    incident_chain_id: Optional[str] = None
+    upstream_incident_id: Optional[str] = None
+    cascade_depth: int = 0
+    cascade_path: List[str] = []

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import asdict
 
 from app.core.audit import record_analysis
-from app.core.causality import validate_causality
+from app.core.causality import DEPENDENCY_MAP, validate_causality
 from app.core.confidence import score_confidence
 from app.core.action_executor import execute_async as action_execute
 from app.core.impact import schedule_verification
@@ -16,12 +17,14 @@ from app.log_processor.summarizer import summarize
 from app.llm.client import analyze
 from app.models.schemas import AnalysisRequest, AnalysisResult, ParsedLog
 from app.services.elk_service import fetch_logs
+from app.services.memory_store import find_recent_incidents_for_chain, link_incident_to_chain
 from app.utils.logger import get_logger
 
 logger = get_logger("agent")
 
 
 async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
+    _t0 = time.monotonic()
     logger.info({"message": "analysis_started", "service": req.service, "env": req.environment})
 
     raw_logs = await fetch_logs(req.service, req.environment.value, req.lookback_minutes)
@@ -39,8 +42,8 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     error_type = detect_error_type(relevant)
     key_events = extract_key_events(relevant)
     severity = classify_severity(relevant, error_type)
-    confidence_hint, confidence_score, confidence_breakdown = score_confidence(
-        summary, error_type, severity
+    confidence_hint, confidence_score, confidence_breakdown = await score_confidence(
+        summary, error_type, severity, service=req.service
     )
 
     raw_evidence = [str(l.get("message", l)) for l in relevant]
@@ -73,6 +76,22 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             "redirected_to": action_target,
         })
 
+    # ── Phase 8e — Pre-safety: determine cascade depth ───────────────────────
+    _pre_cascade_depth: int = 0
+    _pre_upstream_match: dict | None = None
+    try:
+        from datetime import datetime, timezone as _tz
+        _now_iso = datetime.now(_tz.utc).isoformat()
+        _recent = await find_recent_incidents_for_chain(_now_iso, lookback_minutes=10)
+        _upstream_services = set(DEPENDENCY_MAP.get(req.service, []))
+        for _inc in _recent:
+            if _inc.get("service") in _upstream_services:
+                _pre_upstream_match = _inc
+                _pre_cascade_depth = (_inc.get("cascade_depth") or 0) + 1
+                break
+    except Exception:  # noqa: BLE001
+        pass
+
     # ── Phase 5: safety stack ─────────────────────────────────────────────────
     safety = await safety_validate(
         service=req.service,
@@ -82,6 +101,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         confidence=confidence_hint,
         proposed_action=llm_result.get("proposed_action", {}),
         causality=causality,
+        cascade_depth=_pre_cascade_depth,
     )
 
     # Override proposed action if safety denied or modified it
@@ -122,7 +142,32 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         safety_decision="allowed" if safety.allowed else "denied",
         safety_reason=safety.reason,
         log_summary=asdict(summary),
+        tool_calls=llm_result.pop("_tool_calls", []),
     )
+
+    # ── Phase 8e — Temporal incident correlation (link after audit) ──────────
+    chain_id: str | None = None
+    upstream_incident_id: str | None = None
+    cascade_depth: int = 0
+    cascade_path: list[str] = []
+
+    try:
+        if _pre_upstream_match:
+            upstream_id = _pre_upstream_match.get("incident_id", "")
+            chain_id = _pre_upstream_match.get("incident_chain_id") or str(uuid.uuid4())
+            upstream_incident_id = upstream_id
+            cascade_depth = _pre_cascade_depth
+            cascade_path = list(_pre_upstream_match.get("cascade_path") or []) + [req.service]
+            await link_incident_to_chain(incident_id, chain_id, upstream_id, cascade_depth, cascade_path)
+            logger.info({
+                "message": "incident_chain_linked",
+                "incident_id": incident_id,
+                "chain_id": chain_id,
+                "upstream_id": upstream_id,
+                "cascade_depth": cascade_depth,
+            })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({"message": "temporal_correlation_failed", "error": str(exc)})
 
     result = AnalysisResult(
         service=req.service,
@@ -150,6 +195,10 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         safety_checks=safety.checks,
         incident_id=incident_id,
         execution_result=asdict(execution_result) if execution_result is not None else None,
+        incident_chain_id=chain_id,
+        upstream_incident_id=upstream_incident_id,
+        cascade_depth=cascade_depth,
+        cascade_path=cascade_path,
     )
 
     logger.info({
@@ -164,4 +213,14 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         "safety_decision": safety.action,
         "incident_id": incident_id,
     })
+
+    # ── Phase 8c — Prometheus metrics ────────────────────────────────────────
+    try:
+        from app.utils.prom_metrics import analysis_duration, analysis_total
+        outcome_label = result.execution_result.get("status", "unknown") if result.execution_result else "no_action"
+        analysis_total.labels(service=req.service, outcome=outcome_label).inc()
+        analysis_duration.observe(time.monotonic() - _t0)
+    except Exception:  # noqa: BLE001
+        pass
+
     return result

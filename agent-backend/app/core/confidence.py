@@ -1,4 +1,4 @@
-"""Confidence scoring engine (Phase 3 + 6g).
+"""Confidence scoring engine (Phase 3 + 6g + 8a).
 
 Returns a tuple of ``(label, score, breakdown)`` where ``breakdown`` lists the
 human-readable per-signal contributions that make up the score.  Operators
@@ -9,14 +9,21 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from app.log_processor.summarizer import LogSummary
+from app.utils.logger import get_logger
+
+logger = get_logger("confidence")
 
 
-def score_confidence(
+async def score_confidence(
     summary: LogSummary,
     error_type: str,
     severity: str,
+    service: str = "",
 ) -> Tuple[str, int, List[str]]:
     """Compute a deterministic confidence score from log signals.
+
+    Phase 8a: if *service* is provided, query historical incidents and apply a
+    +2 boost when ≥2 of the 3 most similar past incidents were resolved.
 
     Returns:
         (label, score, breakdown) where:
@@ -55,6 +62,20 @@ def score_confidence(
     if error_type in ("runtime_crash", "build_failure"):
         score += 1
         breakdown.append(f"+1 error_type={error_type} (high-signal type)")
+
+    # ── Phase 8a — historical match boost ───────────────────────────────────
+    if service:
+        try:
+            from app.services.memory_store import find_similar_incidents
+            similar = await find_similar_incidents(error_type, service, top_k=3)
+            resolved_count = sum(1 for inc in similar if inc.get("outcome") == "resolved")
+            if resolved_count >= 2:
+                score += 2
+                breakdown.append(
+                    f"+2 historical_match ({resolved_count} of {len(similar)} similar incidents resolved)"
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning({"message": "historical_boost_failed", "error": str(exc)})
 
     if score >= 7:
         label = "high"

@@ -31,6 +31,7 @@ async def record_analysis(
     safety_decision: str,
     safety_reason: str,
     log_summary: dict[str, Any],
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build a structured incident document and persist it.
 
@@ -53,6 +54,7 @@ async def record_analysis(
         "safety_decision": safety_decision,
         "safety_reason": safety_reason,
         "log_summary": log_summary,
+        "tool_calls": tool_calls or [],
         "action_state": "pending",
         "outcome": "unknown",
     }

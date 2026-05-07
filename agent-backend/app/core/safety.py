@@ -51,6 +51,7 @@ async def validate(
     confidence: str,
     proposed_action: dict[str, Any],
     causality: CausalityResult,
+    cascade_depth: int = 0,
 ) -> SafetyResult:
     """Run all safety checks and return a SafetyResult.
 
@@ -69,6 +70,11 @@ async def validate(
             "service": service,
             "action": action_type,
         })
+        try:
+            from app.utils.prom_metrics import safety_denials_total
+            safety_denials_total.labels(reason="causality_not_verified").inc()
+        except Exception:  # noqa: BLE001
+            pass
         return SafetyResult(
             allowed=False,
             action="no_action",
@@ -76,6 +82,32 @@ async def validate(
             checks=checks,
         )
     checks["causality"] = "passed"
+
+    # ── 1b. Cascade guard (Phase 8e) ─────────────────────────────────────────
+    # If this incident is part of a causal chain and a destructive action on an
+    # upstream service is already in-flight, downgrade to notify to prevent
+    # redundant parallel remediation.
+    if cascade_depth > 0 and action_type not in _SAFE_ACTIONS:
+        try:
+            in_flight = await find_recent_actions(
+                service=service,
+                action_type=action_type,
+                states=["executing"],
+                within_seconds=300,
+            )
+            if in_flight:
+                logger.info({
+                    "message": "safety_cascade_downgrade",
+                    "service": service,
+                    "cascade_depth": cascade_depth,
+                    "action": action_type,
+                })
+                action_type = "notify"
+                checks["cascade_guard"] = {"downgraded": True, "cascade_depth": cascade_depth}
+            else:
+                checks["cascade_guard"] = {"downgraded": False, "cascade_depth": cascade_depth}
+        except Exception:  # noqa: BLE001
+            checks["cascade_guard"] = {"error": True}
 
     # ── 2. Decision policy ───────────────────────────────────────────────────
     decision = apply_policy(action_type, error_type, severity, confidence)
@@ -92,6 +124,11 @@ async def validate(
             "service": service,
             "reason": loop.reason,
         })
+        try:
+            from app.utils.prom_metrics import safety_denials_total
+            safety_denials_total.labels(reason="loop_freeze").inc()
+        except Exception:  # noqa: BLE001
+            pass
         return SafetyResult(
             allowed=False,
             action="no_action",
@@ -124,6 +161,11 @@ async def validate(
                 "service": service,
                 "action": action_type,
             })
+            try:
+                from app.utils.prom_metrics import safety_denials_total
+                safety_denials_total.labels(reason="idempotency").inc()
+            except Exception:  # noqa: BLE001
+                pass
             return SafetyResult(
                 allowed=False,
                 action="no_action",
@@ -141,6 +183,11 @@ async def validate(
             "service": service,
             "namespace": namespace,
         })
+        try:
+            from app.utils.prom_metrics import safety_denials_total
+            safety_denials_total.labels(reason="namespace_isolation").inc()
+        except Exception:  # noqa: BLE001
+            pass
         return SafetyResult(
             allowed=False,
             action="no_action",
@@ -159,6 +206,11 @@ async def validate(
                 "severity": severity,
                 "confidence": confidence,
             })
+            try:
+                from app.utils.prom_metrics import safety_denials_total
+                safety_denials_total.labels(reason="severity_gate").inc()
+            except Exception:  # noqa: BLE001
+                pass
             return SafetyResult(
                 allowed=False,
                 action="no_action",
@@ -186,6 +238,11 @@ async def validate(
                     "action": action_type,
                     "count": rate_count,
                 })
+                try:
+                    from app.utils.prom_metrics import safety_denials_total
+                    safety_denials_total.labels(reason="rate_limit").inc()
+                except Exception:  # noqa: BLE001
+                    pass
                 return SafetyResult(
                     allowed=False,
                     action="no_action",
@@ -217,6 +274,11 @@ async def validate(
                 "used": budget_used,
                 "limit": budget_total,
             })
+            try:
+                from app.utils.prom_metrics import safety_denials_total
+                safety_denials_total.labels(reason="action_budget").inc()
+            except Exception:  # noqa: BLE001
+                pass
             return SafetyResult(
                 allowed=False,
                 action="no_action",

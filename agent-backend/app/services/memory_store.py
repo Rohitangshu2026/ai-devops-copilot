@@ -217,6 +217,23 @@ async def is_service_frozen(service: str) -> bool:
         return False
 
 
+async def get_recent_incidents(limit: int = 50) -> list[dict]:
+    """Return the most recent *limit* incident documents, sorted by timestamp desc."""
+    try:
+        client = get_client()
+        query: dict[str, Any] = {
+            "query": {"match_all": {}},
+            "sort": [{"timestamp": {"order": "desc"}}],
+            "size": limit,
+        }
+        resp = await client.search(index=_INCIDENTS_READ, body=query)
+        hits = resp["hits"]["hits"]
+        return [h["_source"] for h in hits]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({"message": "get_recent_incidents_failed", "error": str(exc)})
+        return []
+
+
 async def find_similar_incidents(
     error_type: str,
     service: str,
@@ -243,6 +260,52 @@ async def find_similar_incidents(
     except Exception as exc:  # noqa: BLE001
         logger.warning({"message": "find_similar_incidents_failed", "error": str(exc)})
         return []
+
+
+# ── Phase 8e — Temporal incident chain ───────────────────────────────────────
+
+
+async def find_recent_incidents_for_chain(
+    timestamp_iso: str,
+    lookback_minutes: int = 10,
+) -> list[dict]:
+    """Return all incidents in the time window [timestamp - lookback, timestamp]."""
+    try:
+        client = get_client()
+        query: dict[str, Any] = {
+            "query": {
+                "range": {
+                    "timestamp": {
+                        "gte": f"{timestamp_iso}||-{lookback_minutes}m",
+                        "lte": timestamp_iso,
+                    }
+                }
+            },
+            "sort": [{"timestamp": {"order": "desc"}}],
+            "size": 50,
+        }
+        resp = await client.search(index=_INCIDENTS_READ, body=query)
+        hits = resp["hits"]["hits"]
+        return [h["_source"] for h in hits]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({"message": "find_recent_incidents_for_chain_failed", "error": str(exc)})
+        return []
+
+
+async def link_incident_to_chain(
+    incident_id: str,
+    chain_id: str,
+    upstream_id: str,
+    depth: int,
+    path: list[str],
+) -> None:
+    """Update incident with causal chain fields (best-effort)."""
+    await update_incident(incident_id, {
+        "incident_chain_id": chain_id,
+        "upstream_incident_id": upstream_id,
+        "cascade_depth": depth,
+        "cascade_path": path,
+    })
 
 
 # ── Phase 6a — Atomic idempotency lock ───────────────────────────────────────
