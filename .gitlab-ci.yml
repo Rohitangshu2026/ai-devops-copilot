@@ -89,27 +89,36 @@ push-agent-backend:
     - docker push $AGENT_IMAGE:latest
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────
-# Requires GitLab CI variable: KUBECONFIG_CONTENT (base64-encoded kubeconfig)
-# Set it under: Settings → CI/CD → Variables → KUBECONFIG_CONTENT (masked)
+# WHY a self-hosted runner is required here
+# ─────────────────────────────────────────
+# Minikube binds its API server to 127.0.0.1 (e.g. https://127.0.0.1:53953)
+# and stores TLS certificates under ~/.minikube/ on your Mac.  GitLab SaaS
+# runners execute inside containers on remote machines — they cannot reach
+# your laptop's loopback address or read files from your home directory.
+# A self-hosted shell-executor runner registered ON your Mac runs kubectl
+# natively, shares your existing ~/.kube/config, and talks to Minikube
+# directly without any networking tricks or cert copying.
+#
+# One-time setup: see docs/local-runner-setup.md
+#
+# Required CI variables (Settings → CI/CD → Variables):
+#   DOCKER_USERNAME   DockerHub username
+#   DOCKER_PASSWORD   DockerHub password / access token  ← mark as Masked
 
 deploy:
   stage: deploy
-  image: alpine/ansible:latest
+  tags:
+    - local           # routes ONLY to your self-hosted runner on the Mac
+                      # test / build / push continue on GitLab SaaS runners
   needs: [push-sample-app, push-agent-backend]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
   before_script:
-    # Install kubectl — our Ansible role uses plain `command: kubectl`,
-    # not the kubernetes.core collection, so no pip/galaxy packages needed.
-    - apk add --no-cache curl
-    - KUBECTL_VER=$(curl -Lfs https://dl.k8s.io/release/stable.txt)
-    - curl -Lfs "https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl
-    - chmod +x /usr/local/bin/kubectl
-    - mkdir -p ~/.kube
-    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
-    - chmod 600 ~/.kube/config
-    - kubectl cluster-info   # verify connectivity before deploy
+    # Shell executor runs directly on the Mac — kubectl and ~/.kube/config
+    # already exist from Minikube. Verify the cluster is up before deploying.
+    - minikube status || minikube start
+    - kubectl cluster-info
   script:
     - cd ansible
     - ansible-playbook -i inventory.ini deploy.yml

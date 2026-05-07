@@ -78,28 +78,45 @@ automatically imported by the `kibana-setup` container on first start.
 ## CI/CD pipeline
 
 Every push runs tests for both services. Merges to `main` build and push both
-Docker images to DockerHub, then offer a manual deploy gate that runs Ansible.
+Docker images to DockerHub, then offer a manual deploy gate that runs Ansible
+on a self-hosted runner.
 
 ```
-push → test-sample-app  ─┐
-     → test-agent-backend ┘
-           │
-       build-sample-app  ─┐
-       build-agent-backend ┘
-           │
-       push-sample-app   ─┐  (main only) → DockerHub
-       push-agent-backend  ┘
-           │
-       deploy (manual) → ansible-playbook → kubectl apply
+git push
+    │
+    ├── test-sample-app   ─┐
+    ├── test-agent-backend ┘  GitLab SaaS runners (remote)
+    │
+    ├── build-sample-app   ─┐
+    ├── build-agent-backend ┘  GitLab SaaS runners
+    │
+    ├── push-sample-app   ─┐   GitLab SaaS runners → DockerHub
+    ├── push-agent-backend ┘   (main branch only)
+    │
+    └── deploy  [manual]       self-hosted runner on your Mac
+                    │
+                    └── ansible-playbook → kubectl apply → Minikube
 ```
 
-**Required GitLab CI variables** (Settings → CI/CD → Variables):
+### Why the deploy job uses a self-hosted runner
+
+GitLab SaaS runners run in remote containers that cannot reach a Minikube
+cluster because Minikube binds its API server to `127.0.0.1` on your Mac and
+stores TLS certificates under `~/.minikube/` — neither is reachable from a
+remote machine. A shell-executor runner registered on the same Mac runs
+`kubectl` natively using the existing `~/.kube/config` with no extra config.
+
+**One-time runner setup:** see [`docs/local-runner-setup.md`](docs/local-runner-setup.md)
+
+### Required CI variables (Settings → CI/CD → Variables)
 
 | Variable | Description |
 |---|---|
 | `DOCKER_USERNAME` | DockerHub username |
-| `DOCKER_PASSWORD` | DockerHub password or access token *(mask this)* |
-| `KUBECONFIG_CONTENT` | Base64-encoded kubeconfig: `base64 ~/.kube/config` |
+| `DOCKER_PASSWORD` | DockerHub password or access token *(mark as Masked)* |
+
+`KUBECONFIG_CONTENT` is **not needed** — the shell executor on your Mac uses
+`~/.kube/config` directly.
 
 ---
 
