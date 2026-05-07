@@ -118,3 +118,103 @@ async def admin_reload_policy(_auth: None = Depends(require_admin_key)) -> dict:
         "decision_rows": len(policy.decision_table),
         "global": policy.global_.model_dump(),
     }
+
+
+# ── Phase 8b — evaluation metrics dashboard (JSON) ───────────────────────────
+
+
+@router.get("/metrics")
+async def get_metrics() -> dict:
+    """Aggregate evaluation metrics over the last 24h."""
+    from app.core.metrics_builder import compute_metrics
+    return await compute_metrics()
+
+
+# ── Phase 8d — incident timeline ─────────────────────────────────────────────
+
+
+@router.get("/incidents/{incident_id}/timeline")
+async def get_incident_timeline(incident_id: str) -> dict:
+    """Return a chronological timeline of events for an incident."""
+    incident = await get_incident(incident_id)
+    if not incident:
+        raise HTTPException(status_code=404, detail=f"incident '{incident_id}' not found")
+
+    def _fmt_ts(iso: str) -> str:
+        """Extract HH:MM:SS from an ISO timestamp string."""
+        try:
+            return iso[11:19]
+        except Exception:  # noqa: BLE001
+            return iso or ""
+
+    timeline = []
+    base_ts = incident.get("timestamp", "")
+
+    # 1. Error / change-point from log summary
+    log_summary = incident.get("log_summary") or {}
+    cp = log_summary.get("change_point_description", "")
+    if cp:
+        timeline.append({
+            "t": _fmt_ts(base_ts),
+            "event": "error_rate_spike",
+            "detail": cp,
+        })
+
+    # 2. Analysis started
+    timeline.append({
+        "t": _fmt_ts(base_ts),
+        "event": "analysis_started",
+        "detail": (
+            f"confidence={incident.get('confidence_hint', '')}, "
+            f"error_type={incident.get('error_type', '')}"
+        ),
+    })
+
+    # 3. Tool calls
+    for tc in incident.get("tool_calls") or []:
+        timeline.append({
+            "t": _fmt_ts(tc.get("called_at", base_ts)),
+            "event": "tool_call",
+            "detail": (
+                f"{tc.get('tool', '')}({tc.get('args_summary', '')[:60]}) "
+                f"→ {tc.get('result_summary', '')[:60]}"
+            ),
+        })
+
+    # 4. Safety decision
+    safety_dec = incident.get("safety_decision", "")
+    if safety_dec:
+        timeline.append({
+            "t": _fmt_ts(base_ts),
+            "event": f"safety_{safety_dec}",
+            "detail": incident.get("safety_reason", ""),
+        })
+
+    # 5. Action started
+    proposed = incident.get("proposed_action") or {}
+    action_type = proposed.get("type", "")
+    if action_type and action_type not in ("notify", "no_action"):
+        timeline.append({
+            "t": _fmt_ts(base_ts),
+            "event": "action_started",
+            "detail": f"{action_type} {proposed.get('target', incident.get('service', ''))}",
+        })
+
+    # 6. Impact / outcome
+    outcome = incident.get("outcome", "")
+    mttr = incident.get("mttr_seconds")
+    if outcome:
+        detail = f"outcome={outcome}"
+        if mttr is not None:
+            detail += f", mttr={mttr}s"
+        timeline.append({
+            "t": _fmt_ts(base_ts),
+            "event": "impact_verified",
+            "detail": detail,
+        })
+
+    return {
+        "incident_id": incident_id,
+        "service": incident.get("service", ""),
+        "timeline": timeline,
+    }

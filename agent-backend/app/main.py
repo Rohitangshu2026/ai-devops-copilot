@@ -13,6 +13,7 @@ import signal
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, Response
 
 from app.api.routes import router
 from app.core.impact import run_verification_sweeper
@@ -103,3 +104,25 @@ app.include_router(router, prefix="/api/v1")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Phase 8c — Prometheus scrape endpoint ────────────────────────────────────
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Expose Prometheus metrics for scraping (not the JSON dashboard stats)."""
+    from app.utils.prom_metrics import CONTENT_TYPE_LATEST, generate_latest
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ── Phase 8d — HTML dashboard ─────────────────────────────────────────────────
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Server-rendered HTML dashboard showing the 50 most recent incidents."""
+    from app.api.v1.dashboard import render_dashboard
+    from app.services.memory_store import get_recent_incidents
+    incidents = await get_recent_incidents(limit=50)
+    return render_dashboard(incidents)

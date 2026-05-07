@@ -1,6 +1,8 @@
 import asyncio
 import json
 import re
+import time
+from datetime import datetime, timezone
 
 from anthropic import AsyncAnthropic
 
@@ -164,19 +166,38 @@ async def _analyze_with_model(
     result: dict = {}
     valid = False
     reason = ""
+    provider = _provider(model_name)
 
     for attempt in range(2):
         content = build_user_prompt(
             service, environment, error_type, severity, key_events, summary,
             strict=(attempt > 0),
         )
-        provider = _provider(model_name)
-        if provider == "google":
-            result = await _call_gemini(content, service, lookback_minutes, model_name, api_key)
-        elif provider == "openai":
-            result = await _call_openai(content, service, lookback_minutes, model_name, api_key)
+        _call_t0 = time.monotonic()
+        _prom_result = "ok"
+        try:
+            if provider == "google":
+                result = await _call_gemini(content, service, lookback_minutes, model_name, api_key)
+            elif provider == "openai":
+                result = await _call_openai(content, service, lookback_minutes, model_name, api_key)
+            else:
+                result = await _call_anthropic(content, service, lookback_minutes, model_name, api_key)
+        except Exception as _exc:
+            _prom_result = "rate_limit" if _is_retriable(_exc) else "error"
+            try:
+                from app.utils.prom_metrics import llm_call_duration, llm_call_total
+                llm_call_total.labels(provider=provider, model=model_name, result=_prom_result).inc()
+                llm_call_duration.labels(provider=provider).observe(time.monotonic() - _call_t0)
+            except Exception:  # noqa: BLE001
+                pass
+            raise
         else:
-            result = await _call_anthropic(content, service, lookback_minutes, model_name, api_key)
+            try:
+                from app.utils.prom_metrics import llm_call_duration, llm_call_total
+                llm_call_total.labels(provider=provider, model=model_name, result=_prom_result).inc()
+                llm_call_duration.labels(provider=provider).observe(time.monotonic() - _call_t0)
+            except Exception:  # noqa: BLE001
+                pass
 
         result = _guard_llm_result(result, key_events)
         valid, reason = validate_response(result)
@@ -220,6 +241,8 @@ async def _call_gemini(
     chat     = model.start_chat()
     response = await asyncio.to_thread(chat.send_message, user_content)
 
+    tool_calls_log: list[dict] = []
+
     for _ in range(_MAX_TOOL_ROUNDS):
         fn_calls = [
             part.function_call
@@ -233,6 +256,12 @@ async def _call_gemini(
         for fc in fn_calls:
             output = await execute_tool(fc.name, dict(fc.args), service, lookback_minutes)
             logger.info({"message": "tool_executed", "tool": fc.name, "service": service})
+            tool_calls_log.append({
+                "tool": fc.name,
+                "args_summary": str(dict(fc.args))[:100],
+                "result_summary": output[:100] if output else "",
+                "called_at": datetime.now(timezone.utc).isoformat(),
+            })
             tool_parts.append(
                 genai.protos.Part(
                     function_response=genai.protos.FunctionResponse(
@@ -243,7 +272,9 @@ async def _call_gemini(
             )
         response = await asyncio.to_thread(chat.send_message, tool_parts)
 
-    return _parse_json(response.text) if response.text else {}
+    result = _parse_json(response.text) if response.text else {}
+    result["_tool_calls"] = tool_calls_log
+    return result
 
 
 # ── Anthropic agentic loop ────────────────────────────────────────────────────
@@ -260,6 +291,7 @@ async def _call_anthropic(
     client   = AsyncAnthropic(api_key=key)
     messages = [{"role": "user", "content": user_content}]
     response = None
+    tool_calls_log: list[dict] = []
 
     for _ in range(_MAX_TOOL_ROUNDS):
         response = await asyncio.wait_for(
@@ -279,7 +311,9 @@ async def _call_anthropic(
 
         if response.stop_reason != "tool_use":
             text_block = next((b for b in response.content if b.type == "text"), None)
-            return _parse_json(text_block.text if text_block else "{}")
+            result = _parse_json(text_block.text if text_block else "{}")
+            result["_tool_calls"] = tool_calls_log
+            return result
 
         tool_results = []
         for block in response.content:
@@ -291,6 +325,12 @@ async def _call_anthropic(
                     "content":     output,
                 })
                 logger.info({"message": "tool_executed", "tool": block.name, "service": service})
+                tool_calls_log.append({
+                    "tool": block.name,
+                    "args_summary": str(block.input)[:100],
+                    "result_summary": output[:100] if output else "",
+                    "called_at": datetime.now(timezone.utc).isoformat(),
+                })
 
         assistant_content = []
         for b in response.content:
@@ -303,11 +343,13 @@ async def _call_anthropic(
         messages.append({"role": "assistant", "content": assistant_content})
         messages.append({"role": "user",      "content": tool_results})
 
+    result = {}
     if response:
         text_block = next((b for b in response.content if b.type == "text"), None)
         if text_block:
-            return _parse_json(text_block.text)
-    return {}
+            result = _parse_json(text_block.text)
+    result["_tool_calls"] = tool_calls_log
+    return result
 
 
 # ── OpenAI agentic loop ───────────────────────────────────────────────────────
@@ -329,6 +371,7 @@ async def _call_openai(
         {"role": "user",   "content": user_content},
     ]
     response = None
+    tool_calls_log: list[dict] = []
 
     for _ in range(_MAX_TOOL_ROUNDS):
         response = await asyncio.wait_for(
@@ -344,7 +387,9 @@ async def _call_openai(
 
         choice = response.choices[0]
         if choice.finish_reason != "tool_calls" or not choice.message.tool_calls:
-            return _parse_json(choice.message.content or "{}")
+            result = _parse_json(choice.message.content or "{}")
+            result["_tool_calls"] = tool_calls_log
+            return result
 
         # Serialize the assistant turn as a plain dict (avoids SDK object in messages list)
         messages.append({
@@ -364,24 +409,33 @@ async def _call_openai(
         })
 
         for tc in choice.message.tool_calls:
+            args = json.loads(tc.function.arguments)
             output = await execute_tool(
                 tc.function.name,
-                json.loads(tc.function.arguments),
+                args,
                 service,
                 lookback_minutes,
             )
             logger.info({"message": "tool_executed", "tool": tc.function.name, "service": service})
+            tool_calls_log.append({
+                "tool": tc.function.name,
+                "args_summary": str(args)[:100],
+                "result_summary": output[:100] if output else "",
+                "called_at": datetime.now(timezone.utc).isoformat(),
+            })
             messages.append({
                 "role":         "tool",
                 "tool_call_id": tc.id,
                 "content":      output,
             })
 
+    result = {}
     if response:
         last = response.choices[0].message.content
         if last:
-            return _parse_json(last)
-    return {}
+            result = _parse_json(last)
+    result["_tool_calls"] = tool_calls_log
+    return result
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
