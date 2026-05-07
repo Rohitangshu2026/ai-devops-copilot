@@ -14,6 +14,26 @@
     stdin: "{{ ns_manifest.stdout }}"
   changed_when: true
 
+# ── LLM credentials secret ────────────────────────────────────────────────────
+# Creates or updates the llm-credentials Secret from CI variables.
+# At minimum GOOGLE_API_KEYS must be set; LLM_API_KEY may be empty.
+# Variables injected by the CI job via -e flags:
+#   llm_api_key       (GitLab CI variable LLM_API_KEY)
+#   google_api_keys   (GitLab CI variable GOOGLE_API_KEYS)
+#   anthropic_api_keys / openai_api_keys (optional)
+- name: Create or update LLM credentials secret
+  shell: |
+    kubectl create secret generic llm-credentials \
+      --from-literal=LLM_API_KEY="{{ llm_api_key | default('') }}" \
+      --from-literal=GOOGLE_API_KEYS="{{ google_api_keys | default('') }}" \
+      --from-literal=ANTHROPIC_API_KEYS="{{ anthropic_api_keys | default('') }}" \
+      --from-literal=OPENAI_API_KEYS="{{ openai_api_keys | default('') }}" \
+      --from-literal=LLM_MODEL="{{ llm_model | default('gemma-4-31b-it') }}" \
+      -n {{ namespace }} \
+      --dry-run=client -o yaml | kubectl apply -f -
+  changed_when: true
+  no_log: true
+
 - name: Apply sample-app Deployment
   command: >
     kubectl apply -f {{ playbook_dir }}/../k8s/deployment.yaml

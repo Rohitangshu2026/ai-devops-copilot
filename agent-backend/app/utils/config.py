@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     # Provider-specific API keys — comma-separated, rotated on rate-limit.
     # Set at least one key per provider you use.
     # The generic LLM_API_KEY is the last-resort fallback when no provider key is set.
-    llm_api_key: str              # required generic fallback
+    # Optional at startup — the LLM client validates at call time whether any key is available.
+    llm_api_key: str = ""         # generic fallback; can be empty if provider keys are set
     google_api_keys: str = ""     # Google AI (gemini-*, gemma-*)  e.g. "key1,key2"
     anthropic_api_keys: str = ""  # Anthropic (claude-*)           e.g. "key1,key2"
     openai_api_keys: str = ""     # OpenAI   (gpt-*, o1-*, o3-*, o4-*)

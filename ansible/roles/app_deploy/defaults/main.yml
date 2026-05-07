@@ -4,3 +4,11 @@ namespace: default
 sample_app_image: "logicule/sample-app:latest"
 agent_image: "logicule/agent-backend:latest"
 kubectl_timeout: "120s"
+
+# LLM credentials — pass via CI variables or -e flags.
+# At minimum set google_api_keys when using gemma-*/gemini-* models.
+llm_api_key: ""
+google_api_keys: ""
+anthropic_api_keys: ""
+openai_api_keys: ""
+llm_model: "gemma-4-31b-it"

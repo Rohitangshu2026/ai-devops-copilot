@@ -132,13 +132,21 @@ kubectl cluster-info   # should print the local API server address
 
 Set these under **Settings → CI/CD → Variables**:
 
-| Variable | Value | Options |
+| Variable | Description | Options |
 |---|---|---|
-| `DOCKER_USERNAME` | Your DockerHub username | — |
-| `DOCKER_PASSWORD` | DockerHub password or access token | **Mask** this |
+| `DOCKER_USERNAME` | DockerHub username | — |
+| `DOCKER_PASSWORD` | DockerHub password or access token | **Mask** |
+| `GOOGLE_API_KEYS` | Google AI API key(s), comma-separated | **Mask** |
+| `LLM_API_KEY` | Generic fallback key (can leave empty if `GOOGLE_API_KEYS` set) | **Mask** |
+| `ANTHROPIC_API_KEYS` | Anthropic API key(s) — only if using claude-* models | **Mask** |
+| `OPENAI_API_KEYS` | OpenAI API key(s) — only if using gpt-*/o1-* models | **Mask** |
+
+**Minimum required**: `DOCKER_USERNAME`, `DOCKER_PASSWORD`, and at least one LLM key
+(`GOOGLE_API_KEYS` is sufficient for the default `gemma-4-31b-it` model).
 
 The deploy job does **not** require `KUBECONFIG_CONTENT` — the shell executor
-uses `~/.kube/config` on your Mac directly.
+uses `~/.kube/config` on your Mac directly. The Ansible playbook creates the
+`llm-credentials` Kubernetes Secret from these CI variables automatically.
 
 ---
 

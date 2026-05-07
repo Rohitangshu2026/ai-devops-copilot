@@ -41,7 +41,7 @@ spec:
           envFrom:
             - secretRef:
                 name: llm-credentials
-                optional: true
+                optional: false
           livenessProbe:
             httpGet:
               path: /health

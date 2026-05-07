@@ -134,6 +134,10 @@ deploy:
     - ansible-playbook -i inventory.ini deploy.yml
       -e "sample_app_image=$SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA"
       -e "agent_image=$AGENT_IMAGE:$CI_COMMIT_SHORT_SHA"
+      -e "llm_api_key=${LLM_API_KEY:-}"
+      -e "google_api_keys=${GOOGLE_API_KEYS:-}"
+      -e "anthropic_api_keys=${ANTHROPIC_API_KEYS:-}"
+      -e "openai_api_keys=${OPENAI_API_KEYS:-}"
   environment:
     name: production
     url: http://localhost:8001
