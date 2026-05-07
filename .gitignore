@@ -10,3 +10,4 @@ __pycache__/
 sample-app/logs/
 .worktrees/
 .claude/
+builds/
