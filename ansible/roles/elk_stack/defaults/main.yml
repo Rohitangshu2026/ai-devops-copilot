@@ -1,5 +1,5 @@
 ---
 # ELK Stack defaults
-namespace: default
+k8s_namespace: default
 kubectl_timeout: "300s"
 import_kibana_dashboard: true

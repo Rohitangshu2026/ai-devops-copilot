@@ -8,6 +8,16 @@
 #
 # In production, replace step 1 with an already-initialised Vault instance
 # and use Vault Agent Injector for automatic secret injection into pods.
+#
+# IMPLEMENTATION NOTE — pod-side env vars
+# ───────────────────────────────────────
+# `kubectl exec` does NOT propagate the Ansible host's environment into
+# the target pod, so an Ansible-level `environment:` block is invisible
+# to the vault CLI inside the container.  Every `vault` invocation below
+# is wrapped in `sh -c '...'` and explicitly exports VAULT_ADDR + VAULT_TOKEN
+# inside the pod's shell.  The single-quoted heredoc body keeps Jinja
+# substitution working while preventing the host shell from interpreting
+# `$`-signs or other special characters in token contents.
 
 - name: Deploy Vault to Kubernetes
   command: >
@@ -30,17 +40,13 @@
   register: vault_pod
   changed_when: false
 
-# NOTE: `kubectl exec` does NOT propagate the Ansible host's environment
-# into the pod, so we must wrap each `vault` invocation in `sh -c` and
-# export VAULT_ADDR + VAULT_TOKEN inside the pod's shell.  Setting them
-# under Ansible's `environment:` only affects the kubectl process, not
-# the vault CLI running inside the container — that's why the previous
-# version of this role hit `permission denied (403)` on `secrets enable`.
-
 - name: Wait for Vault API to respond
-  command: >
-    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault status"
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      vault status
+    '
   register: vault_status
   until: vault_status.rc == 0
   retries: 12
@@ -48,27 +54,41 @@
   changed_when: false
 
 - name: Enable KV v2 secrets engine (idempotent)
-  command: >
-    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault secrets enable -version=2 -path={{ vault_kv_mount }} kv"
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+
+      if ! vault secrets list -format=json | grep -q "\"{{ vault_kv_mount }}/\""; then
+        vault secrets enable -version=2 -path={{ vault_kv_mount }} kv
+      fi
+    '
   register: kv_enable
-  # "path is already in use" means it's already enabled — not an error
-  failed_when:
-    - kv_enable.rc != 0
-    - "'path is already in use' not in kv_enable.stderr"
-  changed_when: kv_enable.rc == 0
+  changed_when: "'Success!' in kv_enable.stdout"
 
 - name: Write LLM credentials to Vault KV store
-  command: >
-    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault kv put {{ vault_kv_mount }}/{{ vault_secret_path }} LLM_API_KEY='{{ llm_api_key | default('') }}' GOOGLE_API_KEYS='{{ google_api_keys | default('') }}' ANTHROPIC_API_KEYS='{{ anthropic_api_keys | default('') }}' OPENAI_API_KEYS='{{ openai_api_keys | default('') }}' LLM_MODEL='{{ llm_model | default('gemma-4-31b-it') }}'"
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+
+      vault kv put {{ vault_kv_mount }}/{{ vault_secret_path }} \
+        LLM_API_KEY="{{ llm_api_key | default('') }}" \
+        GOOGLE_API_KEYS="{{ google_api_keys | default('') }}" \
+        ANTHROPIC_API_KEYS="{{ anthropic_api_keys | default('') }}" \
+        OPENAI_API_KEYS="{{ openai_api_keys | default('') }}" \
+        LLM_MODEL="{{ llm_model | default('gemma-4-31b-it') }}"
+    '
   changed_when: true
   no_log: true
 
 - name: Verify secret was written
-  command: >
-    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault kv get -field=LLM_MODEL {{ vault_kv_mount }}/{{ vault_secret_path }}"
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      vault kv get -field=LLM_MODEL {{ vault_kv_mount }}/{{ vault_secret_path }}
+    '
   register: vault_verify
   changed_when: false
   no_log: true
