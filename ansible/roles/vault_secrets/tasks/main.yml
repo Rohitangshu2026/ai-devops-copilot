@@ -30,10 +30,17 @@
   register: vault_pod
   changed_when: false
 
+# NOTE: `kubectl exec` does NOT propagate the Ansible host's environment
+# into the pod, so we must wrap each `vault` invocation in `sh -c` and
+# export VAULT_ADDR + VAULT_TOKEN inside the pod's shell.  Setting them
+# under Ansible's `environment:` only affects the kubectl process, not
+# the vault CLI running inside the container — that's why the previous
+# version of this role hit `permission denied (403)` on `secrets enable`.
+
 - name: Wait for Vault API to respond
   command: >
     kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- vault status -address=http://127.0.0.1:{{ vault_port }}
+    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault status"
   register: vault_status
   until: vault_status.rc == 0
   retries: 12
@@ -43,11 +50,7 @@
 - name: Enable KV v2 secrets engine (idempotent)
   command: >
     kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- vault secrets enable -version=2 -path={{ vault_kv_mount }}
-    kv
-  environment:
-    VAULT_ADDR: "http://127.0.0.1:{{ vault_port }}"
-    VAULT_TOKEN: "{{ vault_root_token }}"
+    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault secrets enable -version=2 -path={{ vault_kv_mount }} kv"
   register: kv_enable
   # "path is already in use" means it's already enabled — not an error
   failed_when:
@@ -58,27 +61,14 @@
 - name: Write LLM credentials to Vault KV store
   command: >
     kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- vault kv put
-    {{ vault_kv_mount }}/{{ vault_secret_path }}
-    LLM_API_KEY="{{ llm_api_key | default('') }}"
-    GOOGLE_API_KEYS="{{ google_api_keys | default('') }}"
-    ANTHROPIC_API_KEYS="{{ anthropic_api_keys | default('') }}"
-    OPENAI_API_KEYS="{{ openai_api_keys | default('') }}"
-    LLM_MODEL="{{ llm_model | default('gemma-4-31b-it') }}"
-  environment:
-    VAULT_ADDR: "http://127.0.0.1:{{ vault_port }}"
-    VAULT_TOKEN: "{{ vault_root_token }}"
+    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault kv put {{ vault_kv_mount }}/{{ vault_secret_path }} LLM_API_KEY='{{ llm_api_key | default('') }}' GOOGLE_API_KEYS='{{ google_api_keys | default('') }}' ANTHROPIC_API_KEYS='{{ anthropic_api_keys | default('') }}' OPENAI_API_KEYS='{{ openai_api_keys | default('') }}' LLM_MODEL='{{ llm_model | default('gemma-4-31b-it') }}'"
   changed_when: true
   no_log: true
 
 - name: Verify secret was written
   command: >
     kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }}
-    -- vault kv get -field=LLM_MODEL
-    {{ vault_kv_mount }}/{{ vault_secret_path }}
-  environment:
-    VAULT_ADDR: "http://127.0.0.1:{{ vault_port }}"
-    VAULT_TOKEN: "{{ vault_root_token }}"
+    -- sh -c "VAULT_ADDR=http://127.0.0.1:{{ vault_port }} VAULT_TOKEN={{ vault_root_token }} vault kv get -field=LLM_MODEL {{ vault_kv_mount }}/{{ vault_secret_path }}"
   register: vault_verify
   changed_when: false
   no_log: true
