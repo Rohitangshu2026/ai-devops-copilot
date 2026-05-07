@@ -68,3 +68,8 @@ class AnalysisResult(BaseModel):
     anomaly_score: float = 0.0
     # Phase 9d — cross-model voting result
     cross_validation: Optional[Dict[str, Any]] = None
+    # Phase 10 — blast-radius estimation
+    blast_radius: Optional[Dict[str, Any]] = None
+    # Phase 11d — human approval workflow
+    approval_id: Optional[str] = None
+    action_state: Optional[str] = None   # pending | executing | awaiting_approval | completed

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.auth import require_admin_key
 from app.core.agent import run_analysis
@@ -218,3 +218,89 @@ async def get_incident_timeline(incident_id: str) -> dict:
         "service": incident.get("service", ""),
         "timeline": timeline,
     }
+
+
+# ── Phase 11c — pipeline failure webhook ─────────────────────────────────────
+
+
+@router.post("/webhook/pipeline-failure")
+async def pipeline_failure_webhook(request: Request) -> dict:
+    """Accept GitLab CI / GitHub Actions pipeline-failure webhooks.
+
+    Extracts the failing service name from the payload and triggers an
+    analysis run in the background.  Returns immediately (non-blocking).
+    """
+    from app.api.v1.webhooks import handle_pipeline_failure
+    return await handle_pipeline_failure(request)
+
+
+# ── Phase 11d — human approval workflow ──────────────────────────────────────
+
+
+@router.get("/approvals/{approval_id}")
+async def get_approval_status(approval_id: str) -> dict:
+    """Return the current state of a pending approval request."""
+    from app.core.approval import get_pending
+    req = get_pending(approval_id)
+    if req is None:
+        raise HTTPException(status_code=404, detail=f"approval '{approval_id}' not found or expired")
+    return {
+        "approval_id": approval_id,
+        "incident_id": req.incident_id,
+        "service": req.service,
+        "action_type": req.action_type,
+        "target": req.target,
+        "reason": req.reason,
+        "expires_at": req.expires_at,
+        "created_at": req.created_at,
+        "is_expired": req.is_expired(),
+    }
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve_action(
+    approval_id: str,
+    token: str = Query(..., description="HMAC-SHA256 signed approval token"),
+    approved_by: str = Query("operator", description="Identifier for approving operator"),
+) -> dict:
+    """Approve a pending high-impact action.
+
+    Verifies the HMAC-signed token and marks the action as approved.
+    The action will execute immediately after approval.
+    """
+    from app.core.approval import approve
+    try:
+        result = approve(approval_id, token, approved_by=approved_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    logger.info({
+        "message": "approval_endpoint_approved",
+        "approval_id": approval_id,
+        "approved_by": approved_by,
+    })
+    return result
+
+
+@router.post("/approvals/{approval_id}/reject")
+async def reject_action(
+    approval_id: str,
+    token: str = Query(..., description="HMAC-SHA256 signed approval token"),
+    rejected_by: str = Query("operator", description="Identifier for rejecting operator"),
+) -> dict:
+    """Reject a pending high-impact action.
+
+    Verifies the HMAC-signed token and cancels the proposed action.
+    """
+    from app.core.approval import reject
+    try:
+        result = reject(approval_id, token, rejected_by=rejected_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    logger.info({
+        "message": "approval_endpoint_rejected",
+        "approval_id": approval_id,
+        "rejected_by": rejected_by,
+    })
+    return result

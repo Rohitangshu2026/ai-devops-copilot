@@ -32,6 +32,7 @@ async def record_analysis(
     safety_reason: str,
     log_summary: dict[str, Any],
     tool_calls: list[dict[str, Any]] | None = None,
+    extra_fields: dict[str, Any] | None = None,
 ) -> str:
     """Build a structured incident document and persist it.
 
@@ -58,6 +59,10 @@ async def record_analysis(
         "action_state": "pending",
         "outcome": "unknown",
     }
+
+    # Merge caller-supplied extra fields (e.g. approval_id, action_state override)
+    if extra_fields:
+        incident.update({k: v for k, v in extra_fields.items() if v is not None})
 
     try:
         await save_incident(incident)

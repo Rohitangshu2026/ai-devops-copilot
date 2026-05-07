@@ -5,6 +5,7 @@ import uuid
 from dataclasses import asdict
 
 from app.core.anomaly import compute_anomaly_score
+from app.core.blast_radius import BlastRadiusResult, compute_blast_radius
 from app.core.audit import record_analysis
 from app.core.causality import DEPENDENCY_MAP, validate_causality
 from app.core.confidence import score_confidence
@@ -77,6 +78,15 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             "redirected_to": action_target,
         })
 
+    # ── Phase 10 — Blast-radius estimation ───────────────────────────────────
+    _blast: BlastRadiusResult = compute_blast_radius(req.service)
+    logger.info({
+        "message": "blast_radius_result",
+        "service": req.service,
+        "score": _blast.score,
+        "affected_count": _blast.affected_count,
+    })
+
     # ── Phase 9e — Compute statistical anomaly score ─────────────────────────
     # Default -1.0 means "no baseline available" → anomaly gate is skipped.
     # A real z-score (>= 0.0) from an established baseline gates destructive actions.
@@ -102,7 +112,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     except Exception:  # noqa: BLE001
         pass
 
-    # ── Phase 5 + 9: safety stack ─────────────────────────────────────────────
+    # ── Phase 5 + 9 + 10: safety stack ───────────────────────────────────────
     safety = await safety_validate(
         service=req.service,
         environment=req.environment.value,
@@ -113,17 +123,67 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         causality=causality,
         cascade_depth=_pre_cascade_depth,
         anomaly_score=_anomaly_score,
+        blast_radius_score=_blast.score,
     )
 
     # Override proposed action if safety denied or modified it
     final_action = {**llm_result.get("proposed_action", {}), "type": safety.action}
 
-    # Execute if action is not notify/no_action.
+    # ── Phase 11d — Human approval gate ─────────────────────────────────────
+    # Read service criticality from k8s annotation (cached 60s; None in dev)
+    _criticality: str | None = None
+    try:
+        from app.core.blast_radius import service_criticality_from_k8s
+        _criticality = service_criticality_from_k8s(req.service)
+    except Exception:  # noqa: BLE001
+        pass
+
+    approval_request = None
+    if safety.allowed and safety.action not in ("notify", "no_action"):
+        from app.core.approval import requires_approval, create_approval_request
+        _needs_approval, _approval_reason = requires_approval(
+            action_type=safety.action,
+            service=req.service,
+            confidence=confidence_hint,
+            blast_radius_score=_blast.score,
+            criticality=_criticality,
+        )
+        if _needs_approval:
+            approval_request = create_approval_request(
+                incident_id="pending",  # replaced after audit record
+                service=req.service,
+                action_type=safety.action,
+                target=action_target,
+                reason=_approval_reason,
+            )
+            # Send Slack notification (no-op when SLACK_WEBHOOK_URL unset)
+            try:
+                from app.integrations.slack import notify_approval_required
+                from app.utils.config import settings as _settings
+                await notify_approval_required(
+                    approval_request,
+                    confidence_score=confidence_score,
+                    confidence_breakdown=confidence_breakdown,
+                    blast_radius_score=_blast.score,
+                    base_url=f"http://localhost:{_settings.port if hasattr(_settings, 'port') else 8001}",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning({"message": "slack_notify_failed", "error": str(exc)})
+
+            logger.info({
+                "message": "action_awaiting_approval",
+                "service": req.service,
+                "action_type": safety.action,
+                "approval_id": approval_request.approval_id,
+                "reason": _approval_reason,
+            })
+
+    # Execute if action is not notify/no_action AND no approval pending.
     # execute_async returns immediately with action_state="executing" so the
     # HTTP response is not held open during the rollout polling loop.
     action_id = str(uuid.uuid4())
     execution_result = None
-    if safety.action not in ("notify", "no_action"):
+    if safety.action not in ("notify", "no_action") and approval_request is None:
         execution_result = await action_execute(
             action_id=action_id,
             action_type=safety.action,
@@ -139,6 +199,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         )
 
     # Audit log
+    _action_state = "awaiting_approval" if approval_request else ("executing" if execution_result else "pending")
     incident_id = await record_analysis(
         service=req.service,
         environment=req.environment.value,
@@ -154,6 +215,8 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         safety_reason=safety.reason,
         log_summary=asdict(summary),
         tool_calls=llm_result.pop("_tool_calls", []),
+        extra_fields={"action_state": _action_state,
+                      "approval_id": approval_request.approval_id if approval_request else None},
     )
 
     # ── Phase 8e — Temporal incident correlation (link after audit) ──────────
@@ -212,6 +275,15 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         cascade_path=cascade_path,
         anomaly_score=_anomaly_score,
         cross_validation=llm_result.pop("_cross_validation", None),
+        blast_radius={
+            "score": _blast.score,
+            "affected_count": _blast.affected_count,
+            "affected_services": _blast.affected_services,
+            "direct_dependents": _blast.direct_dependents,
+            "source": _blast.source,
+        },
+        approval_id=approval_request.approval_id if approval_request else None,
+        action_state=_action_state,
     )
 
     logger.info({

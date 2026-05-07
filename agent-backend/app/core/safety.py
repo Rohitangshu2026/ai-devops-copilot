@@ -54,6 +54,7 @@ async def validate(
     causality: CausalityResult,
     cascade_depth: int = 0,
     anomaly_score: float = -1.0,
+    blast_radius_score: str = "low",
 ) -> SafetyResult:
     """Run all safety checks and return a SafetyResult.
 
@@ -255,6 +256,62 @@ async def validate(
                        f"(got severity='{severity}', confidence='{confidence}')",
                 checks=checks,
             )
+
+    # ── 6b. Blast-radius gate (Phase 10) ────────────────────────────────────
+    # High blast-radius actions require higher confidence + severity to proceed.
+    # This prevents acting on a shared-infrastructure service based on a
+    # medium-confidence signal that could cascade to many dependents.
+    _blast_confidence_required = {
+        "critical": "high",
+        "high":     "high",
+        "medium":   "medium",
+        "low":      "low",
+    }
+    _blast_severity_required = {
+        "critical": "critical",
+        "high":     "high",
+        "medium":   "high",
+        "low":      "low",
+    }
+    _severity_rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+    _confidence_rank = {"low": 0, "medium": 1, "high": 2}
+
+    if action_type in _DESTRUCTIVE_ACTIONS and blast_radius_score in ("high", "critical"):
+        req_conf = _blast_confidence_required[blast_radius_score]
+        req_sev  = _blast_severity_required[blast_radius_score]
+        conf_ok  = _confidence_rank.get(confidence, 0) >= _confidence_rank.get(req_conf, 0)
+        sev_ok   = _severity_rank.get(severity, 0) >= _severity_rank.get(req_sev, 0)
+        checks["blast_radius"] = {
+            "score": blast_radius_score,
+            "required_confidence": req_conf,
+            "required_severity":   req_sev,
+            "passed": conf_ok and sev_ok,
+        }
+        if not (conf_ok and sev_ok):
+            logger.warning({
+                "message": "safety_blast_radius_denied",
+                "service": service,
+                "blast_radius_score": blast_radius_score,
+                "confidence": confidence,
+                "severity": severity,
+            })
+            try:
+                from app.utils.prom_metrics import safety_denials_total
+                safety_denials_total.labels(reason="blast_radius").inc()
+            except Exception:  # noqa: BLE001
+                pass
+            return SafetyResult(
+                allowed=False,
+                action="no_action",
+                reason=(
+                    f"blast-radius gate: score={blast_radius_score} requires "
+                    f"confidence>={req_conf} and severity>={req_sev} "
+                    f"(got confidence={confidence}, severity={severity})"
+                ),
+                checks=checks,
+            )
+    else:
+        checks["blast_radius"] = {"score": blast_radius_score, "passed": True}
 
     # ── 7. Per-action rate limit (Phase 6i — driven by policy.yaml) ─────────
     if action_type in _DESTRUCTIVE_ACTIONS:
