@@ -100,9 +100,12 @@ deploy:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
   before_script:
-    - apk add --no-cache curl py3-pip
-    - pip install --quiet kubernetes
-    - ansible-galaxy collection install kubernetes.core --quiet
+    # Install kubectl — our Ansible role uses plain `command: kubectl`,
+    # not the kubernetes.core collection, so no pip/galaxy packages needed.
+    - apk add --no-cache curl
+    - KUBECTL_VER=$(curl -Lfs https://dl.k8s.io/release/stable.txt)
+    - curl -Lfs "https://dl.k8s.io/release/${KUBECTL_VER}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl
+    - chmod +x /usr/local/bin/kubectl
     - mkdir -p ~/.kube
     - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
     - chmod 600 ~/.kube/config
