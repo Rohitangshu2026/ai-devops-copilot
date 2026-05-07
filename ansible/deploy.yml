@@ -1,6 +1,26 @@
 ---
+# AI DevOps Copilot — full deployment playbook
+#
+# Roles executed in order:
+#   1. vault_secrets  — deploys HashiCorp Vault and writes LLM credentials
+#   2. app_deploy     — applies k8s manifests and rolls out application images
+#
+# Both roles are idempotent: running the playbook multiple times produces
+# the same result as running it once.
+#
+# CI invocation (self-hosted runner on Mac):
+#   ansible-playbook -i inventory.ini deploy.yml \
+#     -e "sample_app_image=$IMAGE:$SHA" \
+#     -e "google_api_keys=$GOOGLE_API_KEYS" \
+#     -e "anthropic_api_keys=$ANTHROPIC_API_KEYS"
+#
+# Local invocation:
+#   ansible-playbook -i inventory.ini deploy.yml \
+#     -e "google_api_keys=AIzaSy..."
+
 - name: Deploy AI DevOps Copilot to Kubernetes
   hosts: local
   gather_facts: false
   roles:
+    - vault_secrets
     - app_deploy

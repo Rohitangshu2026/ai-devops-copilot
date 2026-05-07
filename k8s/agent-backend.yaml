@@ -4,6 +4,13 @@ metadata:
   name: agent-backend
   labels:
     app: agent-backend
+  annotations:
+    # Service criticality — used by blast-radius safety gate.
+    # low | medium | high | critical
+    devops-copilot/criticality: "medium"
+    # Services this deployment depends on (comma-separated).
+    # Used by dynamic dependency map in causality.py.
+    devops-copilot/depends-on: "elasticsearch"
 spec:
   replicas: 1
   selector:
@@ -19,6 +26,9 @@ spec:
       labels:
         app: agent-backend
     spec:
+      # ServiceAccount grants the pod RBAC access to the k8s API
+      # (read pods/events, update deployments for action execution).
+      serviceAccountName: agent-backend
       containers:
         - name: agent-backend
           image: logicule/agent-backend:latest
@@ -38,10 +48,16 @@ spec:
               value: "devops-logs-*"
             - name: ENVIRONMENT
               value: "production"
+            # Vault address — agent reads LLM credentials from Vault
+            # if available; falls back to llm-credentials Secret.
+            - name: VAULT_ADDR
+              value: "http://vault:8200"
+            - name: VAULT_TOKEN
+              value: "devops-copilot-root-token"
           envFrom:
             - secretRef:
                 name: llm-credentials
-                optional: false
+                optional: true   # optional — Vault takes precedence when reachable
           livenessProbe:
             httpGet:
               path: /health

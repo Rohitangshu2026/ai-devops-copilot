@@ -1,0 +1,48 @@
+---
+# Restrict agent-backend dashboard to in-cluster traffic only.
+# The /dashboard and /metrics endpoints are internal tools — they should
+# not be reachable from outside the cluster without a NodePort/Ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-backend-ingress
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-backend
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow all in-cluster traffic (pods within the namespace)
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8001
+    # Allow traffic from the same namespace (e.g. ingress controller)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+      ports:
+        - protocol: TCP
+          port: 8001
+
+---
+# sample-app can receive traffic from anywhere (it's the user-facing app)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sample-app-ingress
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: sample-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8000

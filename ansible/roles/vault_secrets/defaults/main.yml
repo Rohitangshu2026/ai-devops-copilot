@@ -1,0 +1,18 @@
+---
+# Vault connection settings
+vault_namespace: default
+vault_service_name: vault
+vault_port: 8200
+vault_root_token: "devops-copilot-root-token"
+vault_kv_mount: "secret"
+vault_secret_path: "llm-credentials"
+
+# Credentials to write into Vault (overridden via CI -e flags)
+llm_api_key: ""
+google_api_keys: ""
+anthropic_api_keys: ""
+openai_api_keys: ""
+llm_model: "gemma-4-31b-it"
+
+# How long to wait for Vault to become ready
+vault_ready_timeout: 60
