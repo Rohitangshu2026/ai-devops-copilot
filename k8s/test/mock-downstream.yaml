@@ -1,0 +1,50 @@
+---
+# Mock downstream service for dependency-error e2e testing.
+# Scale replicas to 0 to simulate "connection refused" for /dep-error tests:
+#   kubectl scale deployment/mock-downstream --replicas=0 -n devops-test
+# Scale back to 1 to restore connectivity.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-downstream
+  namespace: devops-test
+  labels:
+    app: mock-downstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-downstream
+  template:
+    metadata:
+      labels:
+        app: mock-downstream
+    spec:
+      containers:
+        - name: mock-downstream
+          # Reuse the sample-app image — its /health endpoint serves as the
+          # "healthy upstream" response.  Scaling to 0 simulates a dead service.
+          image: logicule/sample-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              memory: "32Mi"
+              cpu: "25m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-downstream
+  namespace: devops-test
+spec:
+  selector:
+    app: mock-downstream
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP

@@ -1,0 +1,113 @@
+---
+# ServiceAccount + RBAC for agent-backend to read k8s events in-cluster.
+# This enables the get_k8s_events agentic tool.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agent-backend
+  namespace: devops-test
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-backend-events-reader
+rules:
+  - apiGroups: [""]
+    resources: ["events", "pods", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-backend-events-reader
+subjects:
+  - kind: ServiceAccount
+    name: agent-backend
+    namespace: devops-test
+roleRef:
+  kind: ClusterRole
+  name: agent-backend-events-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-backend
+  namespace: devops-test
+  labels:
+    app: agent-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-backend
+  template:
+    metadata:
+      labels:
+        app: agent-backend
+    spec:
+      serviceAccountName: agent-backend
+      containers:
+        - name: agent-backend
+          image: logicule/agent-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8001
+          env:
+            - name: ES_URL
+              value: "http://elasticsearch:9200"
+            - name: LLM_MODEL
+              value: "gemini-2.5-flash"
+            # LLM credentials are injected via a Secret.
+            # Create with: kubectl create secret generic llm-credentials \
+            #   --namespace=devops-test --from-literal=api_key=<your-key>
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: api_key
+                  optional: true
+            - name: GOOGLE_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: google_api_keys
+                  optional: true
+            - name: ANTHROPIC_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: llm-credentials
+                  key: anthropic_api_keys
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-backend
+  namespace: devops-test
+spec:
+  selector:
+    app: agent-backend
+  ports:
+    - port: 8001
+      targetPort: 8001
+  type: ClusterIP

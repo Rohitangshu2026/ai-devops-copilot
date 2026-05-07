@@ -1,0 +1,82 @@
+---
+# Sample app deployment for e2e testing.
+# Override FAILURE_MODE env var to activate different failure injection modes.
+# Each failure-mode endpoint reads its own env var (SLOW_MS, MEM_MB, etc.)
+# so multiple modes can be combined if needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+  namespace: devops-test
+  labels:
+    app: sample-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      containers:
+        - name: sample-app
+          image: logicule/sample-app:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: "dev"
+            # Set FAILURE_MODE to "slow" | "crash" | "dep-error" | "oom" to enable a mode.
+            - name: FAILURE_MODE
+              value: ""
+            # /slow endpoint controls
+            - name: SLOW_MS
+              value: "0"
+            - name: SLOW_THRESHOLD_MS
+              value: "2000"
+            # /crash endpoint controls
+            - name: CRASH_MESSAGE
+              value: "k8s-injected crash for e2e testing"
+            # /dep-error endpoint controls (set to mock-downstream service URL)
+            - name: DOWNSTREAM_URL
+              value: ""
+            # /oom endpoint controls (0 = disabled)
+            - name: MEM_MB
+              value: "0"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app
+  namespace: devops-test
+spec:
+  selector:
+    app: sample-app
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
