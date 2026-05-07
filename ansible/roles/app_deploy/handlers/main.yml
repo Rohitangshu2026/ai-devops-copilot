@@ -1,0 +1,8 @@
+---
+- name: Restart sample-app
+  command: kubectl rollout restart deployment/sample-app -n {{ namespace }}
+  listen: "restart sample-app"
+
+- name: Restart agent-backend
+  command: kubectl rollout restart deployment/agent-backend -n {{ namespace }}
+  listen: "restart agent-backend"

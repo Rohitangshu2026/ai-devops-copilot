@@ -1,4 +1,6 @@
-- name: Deploy app to Kubernetes
+---
+- name: Deploy AI DevOps Copilot to Kubernetes
   hosts: local
+  gather_facts: false
   roles:
     - app_deploy
