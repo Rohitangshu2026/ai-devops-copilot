@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.auth import require_admin_key
 from app.core.agent import run_analysis
 from app.core.policy import reload_policy
 from app.models.schemas import AnalysisRequest, AnalysisResult, IncidentStatusResponse
@@ -44,7 +45,10 @@ async def get_incident_status(incident_id: str) -> IncidentStatusResponse:
 
 
 @router.post("/services/{service}/unfreeze")
-async def unfreeze_service(service: str) -> dict:
+async def unfreeze_service(
+    service: str,
+    _auth: None = Depends(require_admin_key),
+) -> dict:
     """Clear the CRITICAL_INTERVENTION_REQUIRED freeze for *service*.
 
     Operator-only endpoint — not gated by auth in this phase (Phase 10
@@ -106,7 +110,7 @@ async def unfreeze_service(service: str) -> dict:
 
 
 @router.post("/admin/reload-policy")
-async def admin_reload_policy() -> dict:
+async def admin_reload_policy(_auth: None = Depends(require_admin_key)) -> dict:
     """Hot-reload policy.yaml from disk.  SIGHUP also triggers this."""
     policy = reload_policy()
     return {
