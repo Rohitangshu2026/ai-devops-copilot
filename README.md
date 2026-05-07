@@ -52,26 +52,38 @@ cd ai-devops-copilot
 docker compose up --build -d
 # Wait ~60s for Elasticsearch to become healthy
 
+# Full end-to-end demo: failure → logs → AI → approval → remediation → verification
+bash scripts/demo.sh
+
+# Or run pieces manually:
 bash scripts/simulate_failure.sh
 sleep 15
-
 curl -s -X POST http://localhost:8001/api/v1/analyze \
   -H 'Content-Type: application/json' \
   -d '{"service":"sample-app","environment":"dev","lookback_minutes":10}' \
   | jq '{root_cause, confidence_hint, proposed_action, safety_decision, incident_id}'
 ```
 
+📖 **Detailed walkthrough:** [`docs/demo.md`](docs/demo.md) — narrates the full
+incident lifecycle with sample outputs, dashboard screenshots, and grading
+criteria mapping.
+
 **Services after `docker compose up`:**
 
-| Service | URL |
-|---|---|
-| Sample app | http://localhost:8000 |
-| Agent backend | http://localhost:8001 |
-| Kibana | http://localhost:5601 |
-| Elasticsearch | http://localhost:9200 |
+| Service | URL | Purpose |
+|---|---|---|
+| Sample app | http://localhost:8000 | Target application with failure-mode endpoints |
+| Agent backend | http://localhost:8001 | AI analysis pipeline + safety controller |
+| Agent dashboard | http://localhost:8001/dashboard | Server-rendered incident audit |
+| Kibana | http://localhost:5601 | Application log visualizations |
+| Elasticsearch | http://localhost:9200 | Log + incident store |
+| Prometheus | http://localhost:9090 | Scrapes agent-backend `/metrics` |
+| Grafana | http://localhost:3000 | Agent metrics dashboard (anonymous viewer) |
 
 Kibana dashboards (Error Rate, Log Level Distribution, Endpoint Heatmap) are
 automatically imported by the `kibana-setup` container on first start.
+Grafana auto-loads the **AI DevOps Copilot — Agent Backend** dashboard from
+`monitoring/grafana-dashboard.json`.
 
 ---
 
@@ -403,25 +415,53 @@ All thresholds are editable in `policy.yaml` — reload live with `SIGHUP` or
 
 ## Kubernetes deployment
 
-### Production
+The full production stack (sample-app + agent-backend + ELK + Prometheus + Grafana
++ Vault + RBAC + HPAs) is layered into four directories:
 
-```bash
-kubectl apply -f k8s/deployment.yaml    # sample-app Deployment
-kubectl apply -f k8s/service.yaml       # sample-app NodePort (30007)
-kubectl apply -f k8s/agent-backend.yaml # agent-backend Deployment + ClusterIP
-kubectl apply -f k8s/hpa.yaml           # HPA: 1–5 replicas, CPU 70%
-
-kubectl get hpa                         # verify autoscaler
-kubectl get pods -o wide
+```
+k8s/
+├── *.yaml             ← application layer (sample-app, agent-backend, vault, RBAC, HPAs)
+├── elk/               ← Elasticsearch StatefulSet, Logstash, Kibana, Filebeat DaemonSet
+├── monitoring/        ← Prometheus + Grafana
+└── test/              ← ephemeral kind cluster manifests for e2e tests
 ```
 
-### Ansible (CI or local)
+### One-command deploy via Ansible (recommended)
 
 ```bash
 cd ansible
 ansible-playbook -i inventory.ini deploy.yml
+```
 
-# Override image tags (CI passes these automatically)
+The playbook runs four roles in order: `vault_secrets` → `elk_stack` →
+`monitoring` → `app_deploy`. Each role is independently re-runnable and
+selectable via tags:
+
+```bash
+ansible-playbook -i inventory.ini deploy.yml --tags elk        # only ELK
+ansible-playbook -i inventory.ini deploy.yml --skip-tags monitoring
+```
+
+### Manual kubectl apply (production)
+
+```bash
+kubectl apply -f k8s/vault.yaml             # secret store
+kubectl apply -f k8s/elk/                   # ES + Logstash + Kibana + Filebeat
+kubectl apply -f k8s/monitoring/            # Prometheus + Grafana
+kubectl apply -f k8s/rbac.yaml              # agent-backend ServiceAccount + ClusterRole
+kubectl apply -f k8s/networkpolicy.yaml     # in-cluster-only access
+kubectl apply -f k8s/deployment.yaml        # sample-app (RollingUpdate, 2 replicas)
+kubectl apply -f k8s/service.yaml           # sample-app NodePort (30007)
+kubectl apply -f k8s/agent-backend.yaml     # agent-backend Deployment + ClusterIP
+kubectl apply -f k8s/hpa.yaml               # sample-app HPA (1–5)
+kubectl apply -f k8s/hpa-agent-backend.yaml # agent-backend HPA (1–3)
+
+kubectl get pods,hpa -o wide
+```
+
+### Image tag overrides (CI deployments)
+
+```bash
 ansible-playbook -i inventory.ini deploy.yml \
   -e "sample_app_image=logicule/sample-app:abc1234" \
   -e "agent_image=logicule/agent-backend:abc1234"
@@ -511,9 +551,30 @@ that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 ## Persistence
 
 - **Elasticsearch data** survives `docker compose down/up` via the `esdata` named volume.
+- In K8s, ES uses a StatefulSet with a 5 GiB PVC (`k8s/elk/elasticsearch.yaml`).
 - **Incidents** written to daily indices `devops-incidents-YYYY.MM.DD` with 90-day ILM delete policy.
 - **Pending verifications** queued in ES — the background sweeper recovers them after pod restarts.
 - **Action locks and leases** in ES — safe under multi-replica (HPA) deployments.
+
+---
+
+## CSE 816 evaluation criteria mapping
+
+| Criterion | Marks | Where it lives |
+|---|---|---|
+| **Working Project (20)** | 20 | All flows wired end-to-end ([demo.md](docs/demo.md)) |
+| Git push triggers fetch → build → test | – | `.gitlab-ci.yml` test + evals + build stages |
+| Push to DockerHub | – | `.gitlab-ci.yml` push-{sample-app,agent-backend} on main |
+| Deploy via Ansible | – | `.gitlab-ci.yml` deploy stage; `ansible/deploy.yml` |
+| Refresh shows changes seamlessly | – | `k8s/deployment.yaml` (2 replicas + maxUnavailable=0) |
+| Logs feed into ELK | – | `k8s/elk/filebeat.yaml` DaemonSet → Logstash → ES |
+| Kibana dashboards | – | `elk/kibana-dashboard.ndjson` auto-imported |
+| **Advanced Features (3)** | 3 | |
+| Vault for secure credentials | – | `k8s/vault.yaml`, `app/utils/vault_client.py`, `ansible/roles/vault_secrets` |
+| Roles in Ansible (modular) | – | 4 roles: `vault_secrets`, `elk_stack`, `monitoring`, `app_deploy` |
+| Kubernetes HPA | – | `k8s/hpa.yaml` (sample-app), `k8s/hpa-agent-backend.yaml` (agent) |
+| **Innovation (2)** | 2 | |
+| AIOps domain | – | LLM agentic loop + 9-gate safety stack + cross-model voting + statistical anomaly baseline + blast-radius graph + HMAC-signed approval workflow + offline eval suite |
 
 ---
 
@@ -547,7 +608,7 @@ that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 │   ├── filebeat.yml        reads /app/logs/app.log
 │   └── kibana-dashboard.ndjson   auto-imported dashboard
 ├── k8s/
-│   ├── deployment.yaml         sample-app Deployment (RollingUpdate)
+│   ├── deployment.yaml         sample-app Deployment (2 replicas, RollingUpdate)
 │   ├── agent-backend.yaml      agent-backend Deployment + Service + criticality annotation
 │   ├── service.yaml            sample-app NodePort
 │   ├── hpa.yaml                HPA 1–5 replicas CPU/memory (sample-app)
@@ -556,17 +617,34 @@ that should not trigger actions). Run with `bash scripts/run_evals.sh`.
 │   ├── rbac.yaml               ServiceAccount + ClusterRole for agent-backend
 │   ├── networkpolicy.yaml      In-cluster-only access for agent-backend
 │   ├── namespace.yaml          devops-copilot Namespace
+│   ├── elk/
+│   │   ├── elasticsearch.yaml  StatefulSet + PVC + ILM bootstrap Job
+│   │   ├── logstash.yaml       Deployment + ConfigMap (Beats input → ES output)
+│   │   ├── kibana.yaml         Deployment + dashboard auto-import Job
+│   │   └── filebeat.yaml       DaemonSet + RBAC (ships container logs)
+│   ├── monitoring/
+│   │   ├── prometheus.yaml     Deployment + RBAC (scrapes agent-backend /metrics)
+│   │   └── grafana.yaml        Deployment + datasource + dashboard provisioning
 │   └── test/                   ephemeral kind cluster manifests
+├── monitoring/
+│   └── grafana-dashboard.json  6-panel agent metrics dashboard
 ├── ansible/
-│   ├── deploy.yml
+│   ├── deploy.yml              vault_secrets → elk_stack → monitoring → app_deploy
 │   └── roles/
 │       ├── vault_secrets/      Vault provisioning + secret injection
+│       ├── elk_stack/          ELK deployment + dashboard ConfigMap
+│       ├── monitoring/         Prometheus + Grafana + dashboard provisioning
 │       └── app_deploy/         tasks, handlers, defaults
+├── docs/
+│   ├── demo.md                 End-to-end walkthrough with grading mapping
+│   ├── local-runner-setup.md   Self-hosted GitLab runner setup
+│   └── screenshots/            Kibana / Grafana / dashboard screenshots
 ├── scripts/
-│   ├── simulate_failure.sh
-│   ├── e2e_setup.sh
-│   ├── e2e_teardown.sh
-│   ├── gen_eval_fixtures.py   parameterised variant generator
-│   └── run_evals.sh           eval suite runner
+│   ├── demo.sh                 Interactive end-to-end walkthrough
+│   ├── simulate_failure.sh     Inject errors into sample-app
+│   ├── e2e_setup.sh            Bootstrap kind cluster
+│   ├── e2e_teardown.sh         Tear down kind cluster
+│   ├── gen_eval_fixtures.py    Parameterised variant generator
+│   └── run_evals.sh            Eval suite runner
 └── docker-compose.yml
 ```

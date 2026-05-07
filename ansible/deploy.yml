@@ -3,10 +3,13 @@
 #
 # Roles executed in order:
 #   1. vault_secrets  — deploys HashiCorp Vault and writes LLM credentials
-#   2. app_deploy     — applies k8s manifests and rolls out application images
+#   2. elk_stack      — Elasticsearch StatefulSet + Logstash + Kibana + Filebeat DaemonSet
+#   3. monitoring     — Prometheus + Grafana with agent-backend dashboard
+#   4. app_deploy     — sample-app + agent-backend Deployments, Services, HPAs, RBAC
 #
-# Both roles are idempotent: running the playbook multiple times produces
-# the same result as running it once.
+# All roles are idempotent: running the playbook multiple times produces
+# the same result as running it once.  Each role can also be skipped via
+# Ansible tags (e.g. --skip-tags monitoring).
 #
 # CI invocation (self-hosted runner on Mac):
 #   ansible-playbook -i inventory.ini deploy.yml \
@@ -22,5 +25,7 @@
   hosts: local
   gather_facts: false
   roles:
-    - vault_secrets
-    - app_deploy
+    - { role: vault_secrets, tags: [vault, secrets] }
+    - { role: elk_stack,     tags: [elk, logs] }
+    - { role: monitoring,    tags: [monitoring, metrics] }
+    - { role: app_deploy,    tags: [app, deploy] }

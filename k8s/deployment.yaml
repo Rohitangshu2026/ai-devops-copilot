@@ -8,7 +8,10 @@ metadata:
     devops-copilot/criticality: "high"
     devops-copilot/depends-on: "elasticsearch"
 spec:
-  replicas: 1
+  # 2 replicas + RollingUpdate(maxUnavailable=0, maxSurge=1) guarantees
+  # zero-downtime refreshes: one pod always serves traffic while the other
+  # is replaced. Required for the "seamless live patching" demo.
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
