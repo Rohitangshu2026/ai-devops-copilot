@@ -6,7 +6,7 @@ from dataclasses import asdict
 from app.core.audit import record_analysis
 from app.core.causality import validate_causality
 from app.core.confidence import score_confidence
-from app.core.action_executor import execute as action_execute
+from app.core.action_executor import execute_async as action_execute
 from app.core.impact import schedule_verification
 from app.core.safety import validate as safety_validate
 from app.log_processor.classifier import classify_severity
@@ -87,7 +87,9 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     # Override proposed action if safety denied or modified it
     final_action = {**llm_result.get("proposed_action", {}), "type": safety.action}
 
-    # Execute if action is not notify/no_action
+    # Execute if action is not notify/no_action.
+    # execute_async returns immediately with action_state="executing" so the
+    # HTTP response is not held open during the rollout polling loop.
     action_id = str(uuid.uuid4())
     execution_result = None
     if safety.action not in ("notify", "no_action"):
@@ -97,7 +99,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             service=action_target,
             dry_run=(req.environment.value == "dev"),
         )
-        # Schedule impact verification 2 min later (fire-and-forget)
+        # Schedule impact verification 2 min later (persisted in ES, survives restart)
         await schedule_verification(
             incident_id=action_id,
             service=req.service,
