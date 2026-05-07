@@ -1,0 +1,4 @@
+---
+namespace: default
+kubectl_timeout: "180s"
+provision_grafana_dashboard: true
