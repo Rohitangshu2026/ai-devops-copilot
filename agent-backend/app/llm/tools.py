@@ -1,4 +1,16 @@
-"""Tool definitions and ES-backed executors for the Phase 4 agentic loop."""
+"""Tool definitions and ES-backed executors for the Phase 4 agentic loop.
+
+Phase 7 adds a third tool — get_k8s_events — that queries the Kubernetes
+events API to surface pod crashes, OOMKills, FailedScheduling, and other
+infrastructure-level events that never appear in application logs.  The tool
+degrades gracefully: if the kubernetes Python package is not installed, or if
+no kubeconfig / in-cluster credentials are available, it returns the sentinel
+string "k8s events unavailable" instead of raising an exception.
+"""
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.elk_service import get_client
@@ -48,6 +60,29 @@ TOOLS: list[dict] = [
                 "lookback_minutes": {
                     "type": "integer",
                     "description": "how far back to aggregate (defaults to the analysis window)",
+                },
+            },
+        },
+    },
+    {
+        "name": "get_k8s_events",
+        "description": (
+            "Retrieve recent Kubernetes events for a service (pod, deployment, or service "
+            "object). Use this to identify pod crashes, OOMKills, scheduling failures, "
+            "image pull errors, or CrashLoopBackOff notices that are not visible in "
+            "application logs. Returns 'k8s events unavailable' if the cluster cannot be "
+            "reached (docker-compose mode, no kubeconfig, etc.)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Kubernetes namespace to search (defaults to 'default')",
+                },
+                "lookback_minutes": {
+                    "type": "integer",
+                    "description": "how far back to look for events (defaults to analysis window)",
                 },
             },
         },
@@ -103,7 +138,21 @@ def get_gemini_tools():
                 },
             ),
         )
-        _GEMINI_TOOLS_CACHE = genai.protos.Tool(function_declarations=[search, freq])
+        k8s_events = genai.protos.FunctionDeclaration(
+            name="get_k8s_events",
+            description=(
+                "Retrieve recent Kubernetes events for a service — pod crashes, "
+                "OOMKills, scheduling failures, image pull errors."
+            ),
+            parameters=genai.protos.Schema(
+                type=genai.protos.Type.OBJECT,
+                properties={
+                    "namespace":        genai.protos.Schema(type=genai.protos.Type.STRING),
+                    "lookback_minutes": genai.protos.Schema(type=genai.protos.Type.INTEGER),
+                },
+            ),
+        )
+        _GEMINI_TOOLS_CACHE = genai.protos.Tool(function_declarations=[search, freq, k8s_events])
     return _GEMINI_TOOLS_CACHE
 
 
@@ -126,6 +175,12 @@ async def execute_tool(
             )
         if name == "get_error_frequency":
             return await _get_error_frequency(
+                lookback_minutes=int(tool_input.get("lookback_minutes", lookback_minutes)),
+                service=service,
+            )
+        if name == "get_k8s_events":
+            return await _get_k8s_events(
+                namespace=str(tool_input.get("namespace", "default")),
                 lookback_minutes=int(tool_input.get("lookback_minutes", lookback_minutes)),
                 service=service,
             )
@@ -237,3 +292,69 @@ async def _get_error_frequency(lookback_minutes: int, service: str) -> str:
     for b in buckets:
         lines.append(f"  {b['key']}: {b['doc_count']} errors")
     return "\n".join(lines)
+
+
+async def _get_k8s_events(namespace: str, lookback_minutes: int, service: str) -> str:
+    """List recent Kubernetes events filtered by service/pod name.
+
+    Tries in-cluster credentials first (running inside a pod), then falls back
+    to the local kubeconfig.  Returns a sentinel string on *any* failure so the
+    LLM agentic loop continues gracefully when k8s is not available (e.g. in
+    docker-compose mode, CI without a cluster, or when the kubernetes package
+    is not installed).
+    """
+    try:
+        # Soft import — keeps the package optional for environments without k8s.
+        try:
+            from kubernetes import client as k8s_client  # type: ignore[import]
+            from kubernetes import config as k8s_config  # type: ignore[import]
+        except ImportError:
+            return "k8s events unavailable"
+
+        # In-cluster config (pod ServiceAccount) → local kubeconfig fallback.
+        try:
+            k8s_config.load_incluster_config()
+        except k8s_config.ConfigException:
+            try:
+                k8s_config.load_kube_config()
+            except Exception:
+                return "k8s events unavailable"
+
+        v1 = k8s_client.CoreV1Api()
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+
+        # field_selector narrows the API response to events for this service.
+        field_selector = f"involvedObject.name={service}" if service else ""
+        resp = await asyncio.to_thread(
+            v1.list_namespaced_event,
+            namespace,
+            field_selector=field_selector or None,
+        )
+
+        lines: list[str] = []
+        for event in resp.items:
+            # last_timestamp is a datetime; event_time is used for newer API versions.
+            ts = event.last_timestamp or event.event_time
+            if ts is None:
+                continue
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts < cutoff:
+                continue
+            ts_str = ts.strftime("%Y-%m-%dT%H:%M:%S")
+            obj_name = (event.involved_object.name if event.involved_object else "unknown")
+            lines.append(
+                f"[{ts_str}] {event.type}/{event.reason}: {event.message} (object: {obj_name})"
+            )
+
+        if not lines:
+            return (
+                f"No k8s events found for '{service}' in namespace '{namespace}' "
+                f"in the last {lookback_minutes}m"
+            )
+
+        return "\n".join(lines[:20])  # cap to 20 events per call
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({"message": "k8s_events_unavailable", "error": str(exc)})
+        return "k8s events unavailable"
