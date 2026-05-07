@@ -21,13 +21,13 @@ def _make_es_mock(hits=None, aggregations=None, total=0):
 
 # ── TOOLS schema ──────────────────────────────────────────────────────────────
 
-def test_tools_list_has_two_entries():
-    assert len(TOOLS) == 2
+def test_tools_list_has_three_entries():
+    assert len(TOOLS) == 3
 
 
 def test_tools_have_required_fields():
     names = {t["name"] for t in TOOLS}
-    assert names == {"search_logs", "get_error_frequency"}
+    assert names == {"search_logs", "get_error_frequency", "get_k8s_events"}
     for tool in TOOLS:
         assert "description" in tool
         assert "input_schema" in tool
