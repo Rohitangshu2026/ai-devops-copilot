@@ -4,60 +4,114 @@ stages:
   - push
   - deploy
 
+# ── Variables ──────────────────────────────────────────────────────────────────
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  SAMPLE_APP_IMAGE: $DOCKER_USERNAME/sample-app
+  AGENT_IMAGE: $DOCKER_USERNAME/agent-backend
+
+# ── Test ───────────────────────────────────────────────────────────────────────
+
 test-sample-app:
   stage: test
-  image: python:3.11
+  image: python:3.11-slim
   script:
     - cd sample-app
-    - pip install -r requirements.txt
-    - pytest
+    - pip install --quiet -r requirements.txt
+    - pytest -q
 
 test-agent-backend:
   stage: test
-  image: python:3.11
+  image: python:3.11-slim
   script:
     - cd agent-backend
-    - pip install -r requirements.txt
-    - pytest
+    - pip install --quiet -r requirements.txt
+    - pytest tests/ --ignore=tests/e2e --ignore=tests/test_integration_llm.py -q
 
-build:
+# ── Build ──────────────────────────────────────────────────────────────────────
+
+build-sample-app:
   stage: build
-  image: docker:latest
+  image: docker:24
   services:
-    - docker:dind
-  variables:
-    DOCKER_TLS_CERTDIR: ""
+    - docker:24-dind
   script:
-    - docker build -t $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA sample-app/
-    - docker save $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA > image.tar
+    - docker build -t $SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA sample-app/
+    - docker save $SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA > sample-app.tar
   artifacts:
     paths:
-      - image.tar
+      - sample-app.tar
     expire_in: 1 hour
 
-push:
-  stage: push
-  image: docker:latest
+build-agent-backend:
+  stage: build
+  image: docker:24
   services:
-    - docker:dind
-  variables:
-    DOCKER_TLS_CERTDIR: ""
-  needs: [build]
+    - docker:24-dind
+  script:
+    - docker build -t $AGENT_IMAGE:$CI_COMMIT_SHORT_SHA agent-backend/
+    - docker save $AGENT_IMAGE:$CI_COMMIT_SHORT_SHA > agent-backend.tar
+  artifacts:
+    paths:
+      - agent-backend.tar
+    expire_in: 1 hour
+
+# ── Push ───────────────────────────────────────────────────────────────────────
+
+push-sample-app:
+  stage: push
+  image: docker:24
+  services:
+    - docker:24-dind
+  needs: [build-sample-app]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
   script:
-    - docker load < image.tar
+    - docker load < sample-app.tar
     - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    - docker tag $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA $DOCKER_USERNAME/sample-app:latest
-    - docker push $DOCKER_USERNAME/sample-app:$CI_COMMIT_SHORT_SHA
-    - docker push $DOCKER_USERNAME/sample-app:latest
+    - docker tag $SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA $SAMPLE_APP_IMAGE:latest
+    - docker push $SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $SAMPLE_APP_IMAGE:latest
+
+push-agent-backend:
+  stage: push
+  image: docker:24
+  services:
+    - docker:24-dind
+  needs: [build-agent-backend]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  script:
+    - docker load < agent-backend.tar
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+    - docker tag $AGENT_IMAGE:$CI_COMMIT_SHORT_SHA $AGENT_IMAGE:latest
+    - docker push $AGENT_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $AGENT_IMAGE:latest
+
+# ── Deploy ─────────────────────────────────────────────────────────────────────
+# Requires GitLab CI variable: KUBECONFIG_CONTENT (base64-encoded kubeconfig)
+# Set it under: Settings → CI/CD → Variables → KUBECONFIG_CONTENT (masked)
 
 deploy:
   stage: deploy
-  image: alpine:latest
+  image: alpine/ansible:latest
+  needs: [push-sample-app, push-agent-backend]
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
       when: manual
+  before_script:
+    - apk add --no-cache curl py3-pip
+    - pip install --quiet kubernetes
+    - ansible-galaxy collection install kubernetes.core --quiet
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+    - chmod 600 ~/.kube/config
+    - kubectl cluster-info   # verify connectivity before deploy
   script:
-    - echo "To deploy, run:"
-    - echo "cd ansible && ansible-playbook -i inventory.ini deploy.yml"
+    - cd ansible
+    - ansible-playbook -i inventory.ini deploy.yml
+      -e "sample_app_image=$SAMPLE_APP_IMAGE:$CI_COMMIT_SHORT_SHA"
+      -e "agent_image=$AGENT_IMAGE:$CI_COMMIT_SHORT_SHA"
+  environment:
+    name: production
+    url: http://localhost:8001
