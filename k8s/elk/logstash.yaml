@@ -21,6 +21,23 @@ data:
         source => "message"
       }
 
+      # Drop non-JSON lines (uvicorn access logs, systemd messages, etc.).
+      # The json filter above tags failures with _jsonparsefailure.
+      # Filebeat 8.x ECS wraps un-parseable lines in event.original (an object),
+      # which conflicts with the event:text mapping in devops-logs-* → HTTP 400.
+      if "_jsonparsefailure" in [tags] {
+        drop { }
+      }
+
+      # Remove the ECS event object that Filebeat 8.x sets on every document.
+      # Older devops-logs-* indices have `event` mapped as text (from docs with
+      # event: "health_check" plain string).  Indexing event as a nested object
+      # causes document_parsing_exception (HTTP 400).  Removing the field avoids
+      # the type conflict on both old and new index shards.
+      mutate {
+        remove_field => ["event"]
+      }
+
       # Promote app-emitted timestamp to @timestamp when present
       if [timestamp] {
         date {
@@ -30,12 +47,19 @@ data:
         }
       }
 
-      # Tag pod-level metadata for easier dashboard filtering
+      # Set service from k8s container name (authoritative source).
+      # IMPORTANT: within a single Logstash mutate block, add_field executes
+      # BEFORE remove_field.  If the event already has a `service` object
+      # (Filebeat 8.x ECS agent metadata), add_field hits a type conflict and
+      # the field is dropped, then remove_field deletes it — leaving service
+      # absent entirely.  Two separate mutate blocks guarantee the delete
+      # finishes before the add runs.
       if [kubernetes][container][name] {
         mutate {
-          add_field => {
-            "service" => "%{[kubernetes][container][name]}"
-          }
+          remove_field => ["service"]
+        }
+        mutate {
+          add_field => { "service" => "%{[kubernetes][container][name]}" }
         }
       }
     }
@@ -96,14 +120,19 @@ spec:
             httpGet:
               path: /
               port: 9600
-            initialDelaySeconds: 60
+            # On a constrained minikube node (competing with ES, Kibana, etc.),
+            # JRuby + Logstash pipeline startup takes 90–150s under CPU pressure.
+            # 120s initial delay + 5 failures × 30s = up to 4.5 min before restart.
+            initialDelaySeconds: 120
             periodSeconds: 30
+            failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /
               port: 9600
-            initialDelaySeconds: 30
+            initialDelaySeconds: 60
             periodSeconds: 10
+            failureThreshold: 18
       volumes:
         - name: config
           configMap:

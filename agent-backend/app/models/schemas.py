@@ -73,3 +73,6 @@ class AnalysisResult(BaseModel):
     # Phase 11d — human approval workflow
     approval_id: Optional[str] = None
     action_state: Optional[str] = None   # pending | executing | awaiting_approval | completed
+    # Data-quality signal — True when all fetched logs are health-check noise
+    # with no error/warning events in the lookback window.
+    has_only_noise: bool = False

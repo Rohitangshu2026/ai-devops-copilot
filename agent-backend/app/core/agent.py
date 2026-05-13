@@ -41,6 +41,18 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     # time context for error_rate computation). relevant is used for error analysis.
     summary = summarize(raw_logs)
 
+    if summary.has_only_noise:
+        logger.warning({
+            "message": "only_noise_logs_found",
+            "service": req.service,
+            "total_events": summary.total_events,
+            "hint": (
+                "All returned logs are health-check events with no error signals. "
+                "This typically means the error events are outside the lookback "
+                "window. Run simulate_failure.sh and re-analyze immediately."
+            ),
+        })
+
     error_type = detect_error_type(relevant)
     key_events = extract_key_events(relevant)
     severity = classify_severity(relevant, error_type)
@@ -284,6 +296,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         },
         approval_id=approval_request.approval_id if approval_request else None,
         action_state=_action_state,
+        has_only_noise=summary.has_only_noise,
     )
 
     logger.info({

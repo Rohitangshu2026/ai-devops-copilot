@@ -43,19 +43,27 @@ spec:
               value: single-node
             - name: xpack.security.enabled
               value: "false"
+            # 256m heap: leaves headroom for Lucene off-heap so the pod does
+            # not OOMKill on a constrained minikube/dev node (was 512m which
+            # pushed total container RSS past the 1500Mi limit after GC).
             - name: ES_JAVA_OPTS
-              value: "-Xms512m -Xmx512m"
+              value: "-Xms256m -Xmx256m"
             - name: cluster.name
               value: devops-copilot-es
             - name: bootstrap.memory_lock
               value: "false"
+            # Disable mmap: forces nio instead of memory-mapped Lucene files.
+            # Eliminates the largest source of anonymous off-heap memory.
+            # Acceptable perf trade-off for a single-node dev/demo cluster.
+            - name: node.store.allow_mmap
+              value: "false"
           resources:
             requests:
-              memory: "1Gi"
-              cpu: "300m"
+              memory: "512Mi"
+              cpu: "200m"
             limits:
-              memory: "1500Mi"
-              cpu: "1000m"
+              memory: "1Gi"
+              cpu: "800m"
           volumeMounts:
             - name: esdata
               mountPath: /usr/share/elasticsearch/data
@@ -63,16 +71,19 @@ spec:
             httpGet:
               path: /_cluster/health?local=true
               port: 9200
-            initialDelaySeconds: 30
+            initialDelaySeconds: 45
             periodSeconds: 10
-            failureThreshold: 12
+            failureThreshold: 18   # 3 min to become ready after pod start
           livenessProbe:
             httpGet:
               path: /_cluster/health?local=true
               port: 9200
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            failureThreshold: 3
+            initialDelaySeconds: 90
+            # 60s period × 6 failures = 6 min window before restart.
+            # Prevents aggressive restart loops when the host laptop sleeps
+            # and minikube's JVM timer thread lags (GC pause warnings).
+            periodSeconds: 60
+            failureThreshold: 6
   volumeClaimTemplates:
     - metadata:
         name: esdata

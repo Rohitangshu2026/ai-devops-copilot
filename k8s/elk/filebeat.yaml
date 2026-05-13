@@ -14,8 +14,15 @@ data:
       - type: container
         paths:
           - /var/log/containers/*.log
-        # Only ship logs from sample-app and agent-backend pods
-        # (avoid spamming Logstash with kube-system noise).
+        # Only ship logs from pods in the default and devops-test namespaces.
+        # The container log filename embeds the namespace:
+        #   <pod>_<namespace>_<container>-<id>.log
+        # Using log.file.path avoids the add_kubernetes_metadata dependency on
+        # the k8s API.  When the API returns Unauthorized (expired token / RBAC
+        # race), add_kubernetes_metadata silently stops setting
+        # kubernetes.labels.app, causing a label-based drop_event to discard
+        # ALL events — including the sample-app ERROR logs we need.
+        # Path-based filtering requires no API call and is always reliable.
         processors:
           - add_kubernetes_metadata:
               host: ${NODE_NAME}
@@ -27,9 +34,9 @@ data:
                 not:
                   or:
                     - contains:
-                        kubernetes.labels.app: "sample-app"
+                        log.file.path: "_default_"
                     - contains:
-                        kubernetes.labels.app: "agent-backend"
+                        log.file.path: "_devops-test_"
 
     # Logstash handles ILM and template setup
     setup.template.enabled: false
