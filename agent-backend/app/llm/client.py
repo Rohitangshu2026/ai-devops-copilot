@@ -66,23 +66,100 @@ def _model_chain() -> list[str]:
 def _is_retriable(exc: Exception) -> bool:
     """True for rate-limit / quota-exhausted errors that warrant trying the next key/model."""
     msg = str(exc).lower()
+
+    if any(
+        k in msg
+        for k in (
+            "rate limit",
+            "quota",
+            "too many requests",
+            "429",
+            "resource exhausted",
+        )
+    ):
+        return True
+
+    # Anthropic typed error
+    try:
+        from anthropic import RateLimitError
+
+        if isinstance(exc, RateLimitError):
+            return True
+    except ImportError:
+        pass
+
+    # Google typed error
+    try:
+        import google.api_core.exceptions as gexc
+
+        if isinstance(
+            exc,
+            (
+                gexc.ResourceExhausted,
+                gexc.TooManyRequests,
+                gexc.InternalServerError,
+                gexc.ServiceUnavailable,
+                gexc.DeadlineExceeded,
+            ),
+        ):
+            return True
+    except ImportError:
+        pass
+
+    # OpenAI typed error
+    try:
+        from openai import RateLimitError as OpenAIRateLimitError
+
+        if isinstance(exc, OpenAIRateLimitError):
+            return True
+    except ImportError:
+        pass
+
+    return False
+
+
+# ── Retry-with-backoff for same-key transient failures ───────────────────────
+#
+# Without this, a single Google 500 fails over to the next model immediately,
+# burning a fallback slot for what's typically a sub-second transient.  The
+# retry-with-backoff stays on the same model + key for up to N attempts
+# before bubbling up to the model-fallback loop.
+#
+# Strategy:
+#   * 5xx / connection / timeout errors  →  exponential backoff + full jitter,
+#                                            base 0.5s, doubling, capped at 8s
+#   * 429 / quota / rate-limit           →  longer fixed back-off (1s→2s→4s)
+#                                            respecting Retry-After when the
+#                                            SDK exposes it
+#   * 4xx auth / 404 model-not-found     →  no retry; bubble up so the model
+#                                            chain falls over to the next entry
+#
+# Total wall-time budget is capped via `_RETRY_TOTAL_BUDGET_SECONDS` so a
+# misbehaving provider can't hang the request.
+
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_BASE_DELAY   = 0.5    # seconds
+_RETRY_MAX_DELAY    = 8.0    # seconds
+_RETRY_TOTAL_BUDGET_SECONDS = 20.0
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    """Narrow form of _is_retriable — only the 429/quota family."""
+    msg = str(exc).lower()
     if any(k in msg for k in ("rate limit", "quota", "too many requests", "429", "resource exhausted")):
         return True
-    # Anthropic typed error
     try:
         from anthropic import RateLimitError
         if isinstance(exc, RateLimitError):
             return True
     except ImportError:
         pass
-    # Google typed error
     try:
         import google.api_core.exceptions as gexc
         if isinstance(exc, (gexc.ResourceExhausted, gexc.TooManyRequests)):
             return True
     except ImportError:
         pass
-    # OpenAI typed error
     try:
         from openai import RateLimitError as OpenAIRateLimitError
         if isinstance(exc, OpenAIRateLimitError):
@@ -90,6 +167,125 @@ def _is_retriable(exc: Exception) -> bool:
     except ImportError:
         pass
     return False
+
+
+def _is_transient_server(exc: Exception) -> bool:
+    """5xx / connection / timeout — distinct from rate-limit because the
+    backoff cadence differs and rate-limit usually exposes Retry-After."""
+    msg = str(exc).lower()
+    if any(k in msg for k in ("500 internal", "502 bad", "503 service", "504 gateway", "timed out", "connection reset")):
+        return True
+    try:
+        import google.api_core.exceptions as gexc
+        if isinstance(exc, (gexc.InternalServerError, gexc.ServiceUnavailable, gexc.DeadlineExceeded)):
+            return True
+    except ImportError:
+        pass
+    try:
+        from anthropic import APIConnectionError, APITimeoutError, InternalServerError as AnthInternal
+        if isinstance(exc, (APIConnectionError, APITimeoutError, AnthInternal)):
+            return True
+    except ImportError:
+        pass
+    try:
+        from openai import APIConnectionError, APITimeoutError, InternalServerError as OAIInternal
+        if isinstance(exc, (APIConnectionError, APITimeoutError, OAIInternal)):
+            return True
+    except ImportError:
+        pass
+    return False
+
+
+def _parse_retry_after(exc: Exception) -> float | None:
+    """Best-effort Retry-After parser.  Returns seconds when the provider
+    embedded the hint in the error message; None otherwise."""
+    import re as _re
+    m = _re.search(r"retry in\s+([0-9.]+)\s*s", str(exc), _re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    m = _re.search(r"retry[- ]?after[:\s]+([0-9.]+)", str(exc), _re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+async def _call_with_retry(call_fn, *, model_name: str, provider: str):
+    """Run *call_fn* with same-key retry on transient errors.
+
+    The wrapped function is expected to be a zero-arg async callable that
+    invokes the provider SDK.  On non-retriable errors (auth, 404 model)
+    the exception bubbles up immediately so the caller can fall over to
+    the next model in the chain.
+    """
+    import random
+    import asyncio as _aio
+
+    started = time.monotonic()
+    last_exc: Exception | None = None
+
+    for attempt in range(_RETRY_MAX_ATTEMPTS):
+        try:
+            return await call_fn()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            transient = _is_transient_server(exc)
+            rate_limit = _is_rate_limit(exc)
+
+            if not (transient or rate_limit):
+                raise   # non-retriable — let the caller fall over
+
+            if attempt >= _RETRY_MAX_ATTEMPTS - 1:
+                raise   # exhausted attempts
+
+            elapsed = time.monotonic() - started
+            if elapsed >= _RETRY_TOTAL_BUDGET_SECONDS:
+                logger.warning({
+                    "message": "llm_retry_budget_exhausted",
+                    "model": model_name,
+                    "elapsed_seconds": round(elapsed, 2),
+                })
+                raise
+
+            if rate_limit:
+                hinted = _parse_retry_after(exc)
+                if hinted is not None:
+                    delay = min(hinted, _RETRY_MAX_DELAY)
+                else:
+                    delay = min(2 ** attempt, _RETRY_MAX_DELAY)  # 1s, 2s, 4s
+            else:   # transient 5xx
+                delay = min(_RETRY_BASE_DELAY * (2 ** attempt), _RETRY_MAX_DELAY)
+                delay += random.uniform(0.0, _RETRY_BASE_DELAY)  # full jitter
+
+            logger.info({
+                "message": "llm_retry",
+                "model": model_name,
+                "provider": provider,
+                "attempt": attempt + 1,
+                "max_attempts": _RETRY_MAX_ATTEMPTS,
+                "exception_type": type(exc).__name__,
+                "reason": "rate_limit" if rate_limit else "transient_5xx",
+                "delay_seconds": round(delay, 2),
+            })
+
+            # Bump Prometheus retry counter if available.
+            try:
+                from app.utils.prom_metrics import llm_call_total
+                llm_call_total.labels(
+                    provider=provider, model=model_name, result="retry",
+                ).inc()
+            except Exception:  # noqa: BLE001
+                pass
+
+            await _aio.sleep(delay)
+
+    if last_exc is not None:
+        raise last_exc
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -300,12 +496,24 @@ async def _analyze_with_model(
         _call_t0 = time.monotonic()
         _prom_result = "ok"
         try:
+            # Wrap the provider call in retry-with-backoff so a single
+            # transient (Google 500, brief 429, connection blip) doesn't
+            # immediately fail over to the next model in the chain.
             if provider == "google":
-                result = await _call_gemini(content, service, lookback_minutes, model_name, api_key)
+                result = await _call_with_retry(
+                    lambda: _call_gemini(content, service, lookback_minutes, model_name, api_key),
+                    model_name=model_name, provider=provider,
+                )
             elif provider == "openai":
-                result = await _call_openai(content, service, lookback_minutes, model_name, api_key)
+                result = await _call_with_retry(
+                    lambda: _call_openai(content, service, lookback_minutes, model_name, api_key),
+                    model_name=model_name, provider=provider,
+                )
             else:
-                result = await _call_anthropic(content, service, lookback_minutes, model_name, api_key)
+                result = await _call_with_retry(
+                    lambda: _call_anthropic(content, service, lookback_minutes, model_name, api_key),
+                    model_name=model_name, provider=provider,
+                )
         except Exception as _exc:
             _prom_result = "rate_limit" if _is_retriable(_exc) else "error"
             try:

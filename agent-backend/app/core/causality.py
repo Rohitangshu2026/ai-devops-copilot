@@ -1,14 +1,83 @@
 import re
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from app.log_processor.summarizer import LogSummary
 
-# Static dependency map — will be replaced by k8s service mesh discovery in Phase 7
-DEPENDENCY_MAP: dict[str, List[str]] = {
+# Static dependency map — historical fallback, still used when neither the
+# platform registry nor live k8s annotations can answer the lookup.  The map
+# is now lazily merged with platform-registered services at first use.
+_STATIC_DEPENDENCY_MAP: Dict[str, List[str]] = {
     "sample-app": ["elasticsearch"],
     "agent-backend": ["elasticsearch"],
 }
+
+
+def _build_dependency_map() -> Dict[str, List[str]]:
+    """Merge static defaults with every registered platform's service deps.
+
+    Multi-platform refactor: platforms declare each service's dependencies
+    in ``configs/platforms/*.yaml`` (see ``ServiceSpec.depends_on``).  Merging
+    those into the legacy ``DEPENDENCY_MAP`` keeps the existing causality
+    semantics intact while letting new platforms onboard without a code
+    change.
+
+    Live k8s annotations (read by ``blast_radius.py``) still take precedence
+    when available — this map is only the static / config-file source.
+    """
+    merged: Dict[str, List[str]] = {k: list(v) for k, v in _STATIC_DEPENDENCY_MAP.items()}
+    try:
+        from app.platforms.service_registry import dependency_map as _platform_deps
+        for svc, deps in _platform_deps().items():
+            existing = set(merged.get(svc, []))
+            existing.update(deps)
+            merged[svc] = sorted(existing)
+    except Exception:  # noqa: BLE001
+        # Registry not initialised or yaml malformed — fall back to static map.
+        pass
+    return merged
+
+
+class _LazyDepMap(dict):
+    """Dict that refreshes from the platform registry on every read.
+
+    Cheap (<1ms for ~10 platforms × ~5 services each) and keeps callers that
+    expect a plain ``dict`` working without any refactor.  When the registry
+    reloads on SIGHUP, this picks up the new values on the next lookup.
+    """
+
+    def _refresh(self) -> None:
+        super().clear()
+        super().update(_build_dependency_map())
+
+    def __getitem__(self, key):  # type: ignore[override]
+        self._refresh()
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):  # type: ignore[override]
+        self._refresh()
+        return super().get(key, default)
+
+    def __contains__(self, key):  # type: ignore[override]
+        self._refresh()
+        return super().__contains__(key)
+
+    def items(self):  # type: ignore[override]
+        self._refresh()
+        return super().items()
+
+    def keys(self):  # type: ignore[override]
+        self._refresh()
+        return super().keys()
+
+    def values(self):  # type: ignore[override]
+        self._refresh()
+        return super().values()
+
+
+# Public name — preserved for backward compatibility with callers that
+# import ``DEPENDENCY_MAP`` directly (``blast_radius.py``, tests, etc.).
+DEPENDENCY_MAP: Dict[str, List[str]] = _LazyDepMap()
 
 _DEPENDENCY_ERROR_PATTERNS = re.compile(
     r"connection refused|timeout|no such host|ECONNREFUSED|dns|unreachable", re.I

@@ -158,6 +158,20 @@ def get_gemini_tools():
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
+def _default_namespace_for(service: str) -> str:
+    """Resolve the k8s namespace for *service* via the platform registry.
+
+    Falls back to ``"default"`` when:
+      * the registry is unavailable (import error, tests with no yaml dir)
+      * no platform claims this service
+    """
+    try:
+        from app.platforms.service_registry import namespace_for
+        return namespace_for(service, default="default")
+    except Exception:  # noqa: BLE001
+        return "default"
+
+
 async def execute_tool(
     name: str,
     tool_input: dict[str, Any],
@@ -179,8 +193,11 @@ async def execute_tool(
                 service=service,
             )
         if name == "get_k8s_events":
+            # Honor explicit namespace from the LLM tool call when present;
+            # otherwise infer from the registered platform for *service*.
+            ns = str(tool_input.get("namespace") or _default_namespace_for(service))
             return await _get_k8s_events(
-                namespace=str(tool_input.get("namespace", "default")),
+                namespace=ns,
                 lookback_minutes=int(tool_input.get("lookback_minutes", lookback_minutes)),
                 service=service,
             )

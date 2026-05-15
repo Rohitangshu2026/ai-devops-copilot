@@ -19,6 +19,22 @@ from tests.conftest import (
 )
 
 
+# ── Disable same-key retries for tests in THIS file ──────────────────────────
+# `_call_with_retry` will retry transient/429 errors up to 3 times on the
+# same model+key before letting the exception bubble up.  Tests in this
+# file exercise the *model-and-key-fallover* behaviour — they assert
+# "primary called once, then fallback called once" patterns.  With retries
+# enabled those assertions would see 3× more primary calls.
+#
+# The retry path itself has its own dedicated test file (test_llm_retry.py),
+# so it is safe to disable here.
+@pytest.fixture(autouse=True)
+def _no_retries(monkeypatch):
+    monkeypatch.setattr("app.llm.client._RETRY_MAX_ATTEMPTS", 1)
+    monkeypatch.setattr("app.llm.client._RETRY_BASE_DELAY", 0.0)
+    yield
+
+
 # ── _parse_json ───────────────────────────────────────────────────────────────
 
 def test_parse_plain_json():
