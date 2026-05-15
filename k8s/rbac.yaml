@@ -21,7 +21,11 @@ metadata:
 rules:
   # Read pods and events — used by get_k8s_events agentic tool
   - apiGroups: [""]
-    resources: ["pods", "events", "namespaces"]
+    resources:
+    - pods
+    - pods/log
+    - events
+    - namespaces
     verbs: ["get", "list", "watch"]
   # Read and update deployments — used by action executor
   - apiGroups: ["apps"]

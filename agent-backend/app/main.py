@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, Response
 from app.api.routes import router
 from app.core.impact import run_verification_sweeper
 from app.core.policy import load_policy, reload_policy
+from app.platforms.registry import get_registry, reload_registry
 from app.services.elk_service import close_client
 from app.services.memory_store import bootstrap_ilm_policy, recover_orphaned_leases
 from app.utils.logger import get_logger
@@ -28,6 +29,7 @@ logger = get_logger("main")
 _sweeper_task: asyncio.Task | None = None
 _sweeper_stop: asyncio.Event | None = None
 _baseline_task: asyncio.Task | None = None
+_k8s_watcher_task: asyncio.Task | None = None
 
 
 async def _run_baseline_sweeper(stop: asyncio.Event, interval_seconds: int = 86400) -> None:
@@ -81,6 +83,10 @@ def _install_sighup_handler() -> None:
     def _on_sighup() -> None:
         logger.info({"message": "sighup_received"})
         reload_policy()
+        try:
+            reload_registry()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning({"message": "platform_registry_reload_failed", "error": str(exc)})
 
     try:
         loop.add_signal_handler(signal.SIGHUP, _on_sighup)
@@ -101,6 +107,13 @@ async def lifespan(app: FastAPI):
         logger.info({"message": "policy_loaded", "actions": list(policy.actions.keys())})
     except Exception as exc:  # noqa: BLE001
         logger.warning({"message": "policy_load_failed", "error": str(exc)})
+
+    # 1b. Load platform registry (multi-platform refactor).
+    try:
+        reg = get_registry()
+        logger.info({"message": "platforms_loaded", "platforms": reg.names()})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({"message": "platform_registry_load_failed", "error": str(exc)})
 
     # 2. Bootstrap ILM policy (best-effort).
     try:
@@ -126,6 +139,20 @@ async def lifespan(app: FastAPI):
     # 6. Launch daily anomaly baseline sweeper (Phase 9e).
     _baseline_task = asyncio.create_task(_run_baseline_sweeper(_sweeper_stop))
 
+    # 7. Launch k8s event watcher (gated by K8S_WATCHER_ENABLED env var).
+    #    The watcher returns immediately when disabled, so this is safe to
+    #    schedule unconditionally — the env flag is the single source of
+    #    truth for whether it actually runs.
+    global _k8s_watcher_task
+    try:
+        from app.watchers.k8s_event_watcher import start_watcher as _start_k8s_watcher
+        _k8s_watcher_task = asyncio.create_task(_start_k8s_watcher(_sweeper_stop))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning({
+            "message": "k8s_event_watcher_launch_failed",
+            "error": str(exc),
+        })
+
     yield
 
     logger.info({"message": "agent_backend_stopping"})
@@ -138,6 +165,14 @@ async def lifespan(app: FastAPI):
             _sweeper_task.cancel()
     if _baseline_task is not None and not _baseline_task.done():
         _baseline_task.cancel()
+    if _k8s_watcher_task is not None and not _k8s_watcher_task.done():
+        try:
+            # The watcher itself listens to the same _sweeper_stop event and
+            # does its own thread join + cleanup; bound the wait so a stuck
+            # k8s API doesn't block pod termination.
+            await asyncio.wait_for(_k8s_watcher_task, timeout=6.0)
+        except asyncio.TimeoutError:
+            _k8s_watcher_task.cancel()
     await close_client()
     logger.info({"message": "agent_backend_stopped"})
 
