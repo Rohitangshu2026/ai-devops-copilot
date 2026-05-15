@@ -1,9 +1,33 @@
 stages:
+  - validate
   - test
   - evals
   - build
   - push
   - deploy
+
+# ── Validate ───────────────────────────────────────────────────────────────────
+# Multi-platform refactor: parse every configs/platforms/*.yaml through the
+# pydantic schema before letting build/deploy run.  A bad yaml is caught here
+# instead of at agent-backend startup time.
+
+validate-platforms:
+  stage: validate
+  image: python:3.11-slim
+  script:
+    - pip install --quiet PyYAML pydantic pydantic-settings
+    - cd agent-backend
+    - |
+      python -c "
+      from app.platforms.registry import PlatformRegistry
+      import sys
+      reg = PlatformRegistry('../configs/platforms')
+      names = reg.names()
+      print(f'Loaded platforms: {names}')
+      if not names or set(names) == {'default'}:
+          print('ERROR: no platforms loaded — check configs/platforms/*.yaml')
+          sys.exit(1)
+      "
 
 # ── Variables ──────────────────────────────────────────────────────────────────
 variables:

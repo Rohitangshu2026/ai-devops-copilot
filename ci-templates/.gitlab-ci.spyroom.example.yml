@@ -1,0 +1,270 @@
+# GitLab CI template for the SpyRoom repository.
+# ─────────────────────────────────────────────────────────────────────────────
+# Drop this into the root of `gitlab.com/spe-group2/spyroom-platform` as
+# `.gitlab-ci.yml`.  It is a complete, production-style pipeline:
+#
+#   test → build → push → deploy → notify-copilot
+#
+# Highlights:
+#   * Builds and tests each Spring Boot microservice independently in parallel.
+#   * Builds the Next.js frontend as a separate stage.
+#   * Pushes each image to Docker Hub on `main`.
+#   * Deploys via Ansible on a self-hosted runner tagged `local` (the same
+#     runner used by the AI DevOps Copilot — see docs/local-runner-setup.md
+#     in that repo).
+#   * On any pipeline failure, POSTs a signed webhook to the Copilot which
+#     triggers an AI-driven incident analysis and posts the summary back as
+#     an MR comment (when configured).
+#
+# Required GitLab CI variables (Settings → CI/CD → Variables):
+#   DOCKER_USERNAME           DockerHub username
+#   DOCKER_PASSWORD           DockerHub password / access token  (masked)
+#   COPILOT_WEBHOOK_URL       e.g. https://copilot.example.com/api/v1/webhook/pipeline-failure
+#   COPILOT_WEBHOOK_TOKEN     shared HMAC secret matching GITLAB_WEBHOOK_TOKEN on the Copilot side (masked)
+#   KUBECONFIG_CONTENT        base64-encoded kubeconfig (only for the `local` runner)
+# ─────────────────────────────────────────────────────────────────────────────
+
+stages:
+  - test
+  - build
+  - push
+  - deploy
+  - notify
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+  AUTH_IMAGE: $DOCKER_USERNAME/spyroom-auth-service
+  ROOM_IMAGE: $DOCKER_USERNAME/spyroom-room-service
+  GATEWAY_IMAGE: $DOCKER_USERNAME/spyroom-api-gateway
+  FRONTEND_IMAGE: $DOCKER_USERNAME/spyroom-frontend
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository -Dorg.slf4j.simpleLogger.log.org.apache.maven.cli.transfer.Slf4jMavenTransferListener=warn"
+
+# ── Test ─────────────────────────────────────────────────────────────────────
+
+.java-test-template:
+  stage: test
+  image: maven:3.9-eclipse-temurin-21
+  cache:
+    paths:
+      - .m2/repository
+  artifacts:
+    when: always
+    reports:
+      junit: services/*/target/surefire-reports/TEST-*.xml
+    expire_in: 7 days
+
+test-auth-service:
+  extends: .java-test-template
+  script:
+    - cd services/auth-service
+    - ./mvnw $MAVEN_OPTS -B test
+
+test-room-service:
+  extends: .java-test-template
+  script:
+    - cd services/room-service
+    - ./mvnw $MAVEN_OPTS -B test
+
+test-api-gateway:
+  extends: .java-test-template
+  script:
+    - cd services/api-gateway
+    - ./mvnw $MAVEN_OPTS -B test
+
+test-frontend:
+  stage: test
+  image: node:20-alpine
+  cache:
+    paths:
+      - frontend/web-app/node_modules
+  script:
+    - cd frontend/web-app
+    - npm ci --prefer-offline --no-audit
+    - npm run lint
+    - npm run build
+
+# ── Build ────────────────────────────────────────────────────────────────────
+
+.docker-build-template:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+
+build-auth-service:
+  extends: .docker-build-template
+  needs: [test-auth-service]
+  script:
+    - docker build -t $AUTH_IMAGE:$CI_COMMIT_SHORT_SHA services/auth-service/
+    - docker save $AUTH_IMAGE:$CI_COMMIT_SHORT_SHA > auth-service.tar
+  artifacts:
+    paths: [auth-service.tar]
+    expire_in: 1 hour
+
+build-room-service:
+  extends: .docker-build-template
+  needs: [test-room-service]
+  script:
+    - docker build -t $ROOM_IMAGE:$CI_COMMIT_SHORT_SHA services/room-service/
+    - docker save $ROOM_IMAGE:$CI_COMMIT_SHORT_SHA > room-service.tar
+  artifacts:
+    paths: [room-service.tar]
+    expire_in: 1 hour
+
+build-api-gateway:
+  extends: .docker-build-template
+  needs: [test-api-gateway]
+  script:
+    - docker build -t $GATEWAY_IMAGE:$CI_COMMIT_SHORT_SHA services/api-gateway/
+    - docker save $GATEWAY_IMAGE:$CI_COMMIT_SHORT_SHA > api-gateway.tar
+  artifacts:
+    paths: [api-gateway.tar]
+    expire_in: 1 hour
+
+build-frontend:
+  extends: .docker-build-template
+  needs: [test-frontend]
+  script:
+    - docker build -t $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA frontend/web-app/
+    - docker save $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA > frontend.tar
+  artifacts:
+    paths: [frontend.tar]
+    expire_in: 1 hour
+
+# ── Push ─────────────────────────────────────────────────────────────────────
+
+.docker-push-template:
+  stage: push
+  image: docker:24
+  services:
+    - docker:24-dind
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+
+push-auth-service:
+  extends: .docker-push-template
+  needs: [build-auth-service]
+  script:
+    - docker load < auth-service.tar
+    - docker tag $AUTH_IMAGE:$CI_COMMIT_SHORT_SHA $AUTH_IMAGE:latest
+    - docker push $AUTH_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $AUTH_IMAGE:latest
+
+push-room-service:
+  extends: .docker-push-template
+  needs: [build-room-service]
+  script:
+    - docker load < room-service.tar
+    - docker tag $ROOM_IMAGE:$CI_COMMIT_SHORT_SHA $ROOM_IMAGE:latest
+    - docker push $ROOM_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $ROOM_IMAGE:latest
+
+push-api-gateway:
+  extends: .docker-push-template
+  needs: [build-api-gateway]
+  script:
+    - docker load < api-gateway.tar
+    - docker tag $GATEWAY_IMAGE:$CI_COMMIT_SHORT_SHA $GATEWAY_IMAGE:latest
+    - docker push $GATEWAY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $GATEWAY_IMAGE:latest
+
+push-frontend:
+  extends: .docker-push-template
+  needs: [build-frontend]
+  script:
+    - docker load < frontend.tar
+    - docker tag $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA $FRONTEND_IMAGE:latest
+    - docker push $FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA
+    - docker push $FRONTEND_IMAGE:latest
+
+# ── Deploy ───────────────────────────────────────────────────────────────────
+#
+# This stage runs on a self-hosted runner tagged `local` because Minikube
+# binds to 127.0.0.1 + ~/.minikube TLS certs that only exist on the developer
+# laptop. The same `local` runner used by ai-devops-copilot is reused here.
+
+deploy:
+  stage: deploy
+  tags: [local]
+  needs:
+    - push-auth-service
+    - push-room-service
+    - push-api-gateway
+    - push-frontend
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual                 # require an operator click for prod-ish deploys
+  before_script:
+    - export PATH="/opt/homebrew/bin:$PATH"
+    - minikube status || minikube start
+    - kubectl cluster-info
+  script:
+    # Apply SpyRoom k8s manifests (these live in this repo's k8s/ directory).
+    - kubectl apply -f k8s/namespace.yaml
+    - kubectl apply -f k8s/postgres.yaml
+    - kubectl apply -f k8s/redis.yaml
+    - kubectl apply -f k8s/auth-service.yaml
+    - kubectl apply -f k8s/room-service.yaml
+    - kubectl apply -f k8s/api-gateway.yaml
+    - kubectl apply -f k8s/frontend.yaml
+    # Pin the just-built images via kubectl set image (live-patching, no downtime).
+    - kubectl -n spyroom set image deployment/auth-service auth-service=$AUTH_IMAGE:$CI_COMMIT_SHORT_SHA
+    - kubectl -n spyroom set image deployment/room-service room-service=$ROOM_IMAGE:$CI_COMMIT_SHORT_SHA
+    - kubectl -n spyroom set image deployment/api-gateway api-gateway=$GATEWAY_IMAGE:$CI_COMMIT_SHORT_SHA
+    - kubectl -n spyroom set image deployment/spyroom-frontend web-app=$FRONTEND_IMAGE:$CI_COMMIT_SHORT_SHA
+    # Wait for each rollout — RollingUpdate maxUnavailable: 0, maxSurge: 1
+    # gives zero-downtime upgrades.
+    - kubectl -n spyroom rollout status deployment/auth-service --timeout=180s
+    - kubectl -n spyroom rollout status deployment/room-service --timeout=180s
+    - kubectl -n spyroom rollout status deployment/api-gateway --timeout=180s
+    - kubectl -n spyroom rollout status deployment/spyroom-frontend --timeout=180s
+  environment:
+    name: production
+    url: http://localhost:3000
+
+# ── Notify Copilot on failure ────────────────────────────────────────────────
+#
+# Runs only when an earlier stage failed.  POSTs the GitLab pipeline event to
+# the AI DevOps Copilot's webhook endpoint, which:
+#   1. Verifies the X-Gitlab-Token HMAC against its own secret
+#   2. Maps `spyroom-platform` → platform=spyroom via PlatformRegistry
+#   3. Identifies which service failed from the build name
+#   4. Runs an analysis (logs + k8s events + LLM tool use)
+#   5. Posts the summary back as an MR comment (if Copilot's GITLAB_API_TOKEN
+#      is set on its side)
+
+notify-copilot:
+  stage: notify
+  image: alpine:3.19
+  needs: []
+  when: on_failure
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - |
+      PAYLOAD=$(jq -nc \
+        --arg status "failed" \
+        --arg name   "$CI_PROJECT_NAME" \
+        --arg path   "$CI_PROJECT_PATH" \
+        --arg sha    "$CI_COMMIT_SHA" \
+        --arg pipe   "$CI_PIPELINE_ID" \
+        --arg job    "$CI_JOB_NAME" \
+        --arg stage  "$CI_JOB_STAGE" \
+        '{
+          object_kind: "pipeline",
+          object_attributes: {status: $status, id: ($pipe|tonumber)},
+          project: {name: $name, path_with_namespace: $path},
+          commit:  {id: $sha},
+          builds:  [{status: "failed", stage: $stage, name: $job}]
+        }')
+    - |
+      echo "POST $COPILOT_WEBHOOK_URL"
+      curl --fail-with-body --silent --show-error \
+        -X POST "$COPILOT_WEBHOOK_URL" \
+        -H "Content-Type: application/json" \
+        -H "X-Gitlab-Token: $COPILOT_WEBHOOK_TOKEN" \
+        --data "$PAYLOAD"
