@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from dataclasses import asdict
@@ -18,22 +19,163 @@ from app.log_processor.parser import detect_error_type, extract_key_events
 from app.log_processor.summarizer import summarize
 from app.llm.client import analyze
 from app.models.schemas import AnalysisRequest, AnalysisResult, ParsedLog
+from app.platforms.registry import get_registry
 from app.services.elk_service import fetch_logs
 from app.services.memory_store import find_recent_incidents_for_chain, link_incident_to_chain
 from app.utils.logger import get_logger
 
 logger = get_logger("agent")
 
+_K8S_EVENTS_AS_EVIDENCE = os.getenv(
+    "K8S_EVENTS_AS_EVIDENCE", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _heuristic_llm_result(
+    *,
+    service: str,
+    error_type: str,
+    severity: str,
+    key_events: list,
+    summary,
+) -> dict:
+    """Build a deterministic llm_result-shaped dict when the LLM is unavailable.
+
+    This is the safety net for end-to-end working demos when API keys are
+    missing/expired or the model name resolves to 404.  The deterministic
+    safety stack downstream of this function is the real authority — the
+    LLM only provides the *explanation* and a *suggested* action.  When we
+    can't call the LLM, we use the log summary to construct a conservative
+    proposal:
+
+    * root_cause: derived from the dominant error pattern in key_events
+    * suggestion: "investigate" (no automation hint without the LLM)
+    * proposed_action: "notify" — the safest non-destructive action.  The
+      safety stack will tighten or downgrade as usual.
+    """
+    first_event = key_events[0] if key_events else "no events captured"
+    if error_type == "dependency_error":
+        cause = f"dependency failure suspected from log pattern: {first_event}"
+    elif error_type == "runtime_crash":
+        cause = f"runtime crash detected: {first_event}"
+    elif error_type == "build_failure":
+        cause = f"build failure pattern: {first_event}"
+    else:
+        cause = f"unclassified error pattern: {first_event}"
+
+    return {
+        "root_cause": cause,
+        "root_causes": [{"cause": cause, "confidence": 0.4}],
+        "suggestion": (
+            "Manual investigation required.  LLM unavailable — heuristic "
+            "fallback proposed 'notify' as the conservative action.  Inspect "
+            "logs and k8s events directly."
+        ),
+        "proposed_action": {
+            "type": "notify",
+            "target": service,
+            "reason": "LLM unavailable; defaulting to notify per heuristic policy",
+        },
+        "_tool_calls": [],
+        "_heuristic_fallback": True,
+    }
+
 
 async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     _t0 = time.monotonic()
-    logger.info({"message": "analysis_started", "service": req.service, "env": req.environment})
 
-    raw_logs = await fetch_logs(req.service, req.environment.value, req.lookback_minutes)
+    # ── Resolve platform context (multi-platform refactor) ───────────────────
+    # Explicit `req.platform` wins; otherwise reverse-lookup by service;
+    # otherwise the registry's built-in "default" fallback applies.  The
+    # resolved platform drives: ES index pattern, k8s namespace, dry-run
+    # gating, and incident routing metadata.
+    _platform = get_registry().resolve(platform=req.platform, service=req.service)
+    _namespace = req.namespace or _platform.namespace
+
+    logger.info({
+        "message": "analysis_started",
+        "service": req.service,
+        "env": req.environment,
+        "platform": _platform.name,
+        "namespace": _namespace,
+    })
+
+    raw_logs = await fetch_logs(
+        req.service,
+        req.environment.value,
+        req.lookback_minutes,
+        index_pattern=_platform.log_index_pattern,
+        service_field=_platform.log_service_field,
+        namespace=_namespace,
+        pod_name=req.pod_name,
+    )
+
+    # Phase 2 — prepend k8s events so the LLM sees the trigger event first.
+    # This also ensures k8s-only evidence (no ES logs) bypasses the no-data gate.
+    if _K8S_EVENTS_AS_EVIDENCE and req.k8s_events:
+        raw_logs = list(req.k8s_events) + raw_logs
+
     if not raw_logs:
-        raise ValueError(
-            f"No logs found for service='{req.service}' in the last {req.lookback_minutes}m. "
-            "Run simulate_failure.sh to generate log data."
+        # No fresh logs is a *finding*, not a server error.  Returning 500
+        # makes the webhook chain and the demo brittle — a quiet pod is the
+        # most common case in dev/staging.  Build a minimal analysis result
+        # tagged so the dashboard and Slack route it as low-priority.
+        logger.info({
+            "message": "analysis_no_logs",
+            "service": req.service,
+            "platform": _platform.name,
+            "lookback_minutes": req.lookback_minutes,
+        })
+        return AnalysisResult(
+            service=req.service,
+            environment=req.environment.value,
+            platform=_platform.name,
+            namespace=_namespace,
+            root_cause="No log activity in window",
+            root_causes=[{
+                "cause": (
+                    f"No documents found for service='{req.service}' in "
+                    f"index='{_platform.log_index_pattern}' over the last "
+                    f"{req.lookback_minutes}m.  Service may be idle, scaled "
+                    f"to zero, or the log shipper is not reaching ES."
+                ),
+                "confidence": 0.0,
+            }],
+            suggestion=(
+                "Generate traffic against the service or extend "
+                "lookback_minutes.  Verify Filebeat is scraping the "
+                f"'{_platform.namespace}' namespace."
+            ),
+            confidence_hint="low",
+            confidence_score=0,
+            confidence_source="no_data",
+            confidence_breakdown=["no logs in window"],
+            parsed_log=ParsedLog(
+                error_type="unknown",
+                severity="low",
+                key_events=[],
+                summary="no events",
+            ),
+            raw_evidence=[],
+            log_summary={
+                "total_events": 0,
+                "error_count": 0,
+                "warning_count": 0,
+                "error_ratio": 0.0,
+                "unique_endpoints": [],
+                "deduplicated_events": [],
+                "time_span_minutes": 0.0,
+                "has_only_noise": False,
+            },
+            proposed_action={
+                "type": "no_action",
+                "target": req.service,
+                "reason": "no log data — nothing to analyze",
+            },
+            safety_decision="allowed",
+            safety_reason="no_action requires no gate",
+            action_state="completed",
+            has_only_noise=False,
         )
 
     relevant = extract_relevant(raw_logs)
@@ -62,15 +204,46 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
 
     raw_evidence = [str(l.get("message", l)) for l in relevant]
 
-    llm_result = await analyze(
-        service=req.service,
-        environment=req.environment.value,
-        error_type=error_type,
-        severity=severity,
-        key_events=key_events,
-        summary=summary,
-        lookback_minutes=req.lookback_minutes,
-    )
+    # ── LLM call with heuristic fallback ─────────────────────────────────────
+    # When the LLM is unreachable (bad model name, missing/expired keys,
+    # network), we MUST NOT drop the whole incident on the floor — the
+    # deterministic safety stack should still gate a reasonable action.
+    # The heuristic fallback synthesizes an llm_result-shaped dict from the
+    # log summary so downstream code is unchanged.
+    _llm_fallback_used = False
+    _llm_fallback_reason = ""
+    try:
+        llm_result = await analyze(
+            service=req.service,
+            environment=req.environment.value,
+            error_type=error_type,
+            severity=severity,
+            key_events=key_events,
+            summary=summary,
+            lookback_minutes=req.lookback_minutes,
+        )
+    except Exception as _llm_exc:  # noqa: BLE001
+        import traceback as _tb
+        _llm_fallback_used = True
+        _llm_fallback_reason = f"{type(_llm_exc).__name__}: {_llm_exc}"
+        # Print full traceback to stderr so `kubectl logs` shows the failure
+        # path immediately — operators were having to add traceback.print_exc()
+        # to routes.py manually otherwise.
+        _tb.print_exc()
+        logger.warning({
+            "message": "llm_unavailable_using_heuristic",
+            "service": req.service,
+            "error": _llm_fallback_reason,
+            "exception_type": type(_llm_exc).__name__,
+            "traceback_lines": _tb.format_exc().splitlines()[-5:],
+        })
+        llm_result = _heuristic_llm_result(
+            service=req.service,
+            error_type=error_type,
+            severity=severity,
+            key_events=key_events,
+            summary=summary,
+        )
 
     # ranked hypotheses — LLM returns root_causes array
     root_causes: list = llm_result.get("root_causes") or []
@@ -98,6 +271,28 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         "score": _blast.score,
         "affected_count": _blast.affected_count,
     })
+
+    # ── Deployment-aware incident correlation ────────────────────────────────
+    # Pulls recent rollouts from the k8s API and checks whether the error
+    # spike's change-point falls shortly AFTER a rollout.  Surfaces a
+    # rollback candidate when confidence is high AND the namespace is
+    # non-production.  Never auto-executes — recommendation only.
+    _deployment_correlation = None
+    try:
+        from app.core.deployment_correlation import analyze_deployment_correlation
+        _deployment_correlation = analyze_deployment_correlation(
+            service=req.service,
+            namespace=_namespace,
+            incident_summary=summary,
+            confidence_score=confidence_score,
+            blast_radius_score=_blast.score,
+        )
+    except Exception as _dep_exc:  # noqa: BLE001
+        logger.warning({
+            "message": "deployment_correlation_failed",
+            "service": req.service,
+            "error": str(_dep_exc),
+        })
 
     # ── Phase 9e — Compute statistical anomaly score ─────────────────────────
     # Default -1.0 means "no baseline available" → anomaly gate is skipped.
@@ -200,7 +395,7 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
             action_id=action_id,
             action_type=safety.action,
             service=action_target,
-            dry_run=(req.environment.value == "dev"),
+            dry_run=_platform.is_dry_run(req.environment.value),
         )
         # Schedule impact verification 2 min later (persisted in ES, survives restart)
         await schedule_verification(
@@ -255,15 +450,29 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
     except Exception as exc:  # noqa: BLE001
         logger.warning({"message": "temporal_correlation_failed", "error": str(exc)})
 
+    # Phase 2 — surface pod restart data when k8s evidence was attached
+    _pod_status = None
+    if req.k8s_events:
+        _first_k8s = req.k8s_events[0]
+        if _first_k8s.get("restart_count") is not None:
+            _pod_status = {
+                "pod_name": _first_k8s.get("pod_name"),
+                "namespace": _first_k8s.get("namespace"),
+                "restart_count": _first_k8s.get("restart_count"),
+                "restart_count_delta": _first_k8s.get("restart_count_delta"),
+            }
+
     result = AnalysisResult(
         service=req.service,
         environment=req.environment.value,
+        platform=_platform.name,
+        namespace=_namespace,
         root_cause=primary_cause,
         root_causes=root_causes,
         suggestion=llm_result.get("suggestion", ""),
         confidence_hint=confidence_hint,
         confidence_score=confidence_score,
-        confidence_source="signal",
+        confidence_source=("heuristic_fallback" if _llm_fallback_used else "signal"),
         confidence_breakdown=confidence_breakdown,
         parsed_log=ParsedLog(
             error_type=error_type,
@@ -297,6 +506,20 @@ async def run_analysis(req: AnalysisRequest) -> AnalysisResult:
         approval_id=approval_request.approval_id if approval_request else None,
         action_state=_action_state,
         has_only_noise=summary.has_only_noise,
+        # ── Deployment-aware incident correlation ────────────────────
+        deployment_timeline=(
+            _deployment_correlation.to_response_dict()["deployment_timeline"]
+            if _deployment_correlation else []
+        ),
+        deployment_suspected=(
+            _deployment_correlation.deployment_suspected
+            if _deployment_correlation else False
+        ),
+        rollback_candidate=(
+            _deployment_correlation.to_response_dict()["rollback_candidate"]
+            if _deployment_correlation else None
+        ),
+        pod_status=_pod_status,
     )
 
     logger.info({

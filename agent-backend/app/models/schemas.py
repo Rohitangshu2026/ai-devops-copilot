@@ -15,6 +15,15 @@ class AnalysisRequest(BaseModel):
     pipeline_id: Optional[str] = None
     environment: Environment = Environment.dev
     lookback_minutes: int = 30
+    # ── Multi-platform refactor ──────────────────────────────────────────
+    # Explicit platform name from configs/platforms/*.yaml.  When omitted,
+    # the registry reverse-looks-up the platform that owns *service*.  Both
+    # fields are optional to preserve the original single-service API.
+    platform: Optional[str] = None
+    namespace: Optional[str] = None
+    # ── Phase 2 — K8s events as evidence ────────────────────────────────
+    pod_name: Optional[str] = None
+    k8s_events: List[Dict[str, Any]] = []
 
 
 class ParsedLog(BaseModel):
@@ -40,6 +49,11 @@ class IncidentStatusResponse(BaseModel):
 class AnalysisResult(BaseModel):
     service: str
     environment: str
+    # Resolved platform (echoed back so the dashboard / Slack can route the
+    # incident to the right owners).  Optional for backward compatibility
+    # with stored incident docs from before the refactor.
+    platform: Optional[str] = None
+    namespace: Optional[str] = None
     root_cause: str                          # alias for root_causes[0].cause
     root_causes: List[Dict[str, Any]]        # ranked hypotheses with confidence
     suggestion: str
@@ -76,3 +90,12 @@ class AnalysisResult(BaseModel):
     # Data-quality signal — True when all fetched logs are health-check noise
     # with no error/warning events in the lookback window.
     has_only_noise: bool = False
+    # ── Deployment-aware incident correlation ────────────────────────────
+    # Populated by app/core/deployment_correlation.py.  Always present in
+    # the response (empty list / False / None when no signal) so clients
+    # don't have to handle a missing key.
+    deployment_timeline: List[Dict[str, Any]] = []
+    deployment_suspected: bool = False
+    rollback_candidate: Optional[Dict[str, Any]] = None
+    # ── Phase 2 — K8s events as evidence ────────────────────────────────
+    pod_status: Optional[Dict[str, Any]] = None
