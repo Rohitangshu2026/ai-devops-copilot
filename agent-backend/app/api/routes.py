@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import traceback
 
 from app.api.auth import require_admin_key
 from app.core.agent import run_analysis
 from app.core.policy import reload_policy
 from app.models.schemas import AnalysisRequest, AnalysisResult, IncidentStatusResponse
+from app.platforms.registry import get_registry, reload_registry
 from app.services.memory_store import get_incident, update_incident
 from app.utils.logger import get_logger
 
@@ -16,7 +18,15 @@ async def analyze(req: AnalysisRequest) -> AnalysisResult:
     try:
         return await run_analysis(req)
     except Exception as exc:
-        logger.info({"message": "analysis_error", "error": str(exc)})
+        traceback.print_exc()
+
+        logger.exception({
+            "message": "analysis_error",
+            "error": str(exc),
+            "type": str(type(exc)),
+            "repr": repr(exc),
+        })
+
         raise HTTPException(status_code=500, detail=str(exc))
 
 
@@ -118,6 +128,129 @@ async def admin_reload_policy(_auth: None = Depends(require_admin_key)) -> dict:
         "decision_rows": len(policy.decision_table),
         "global": policy.global_.model_dump(),
     }
+
+
+# ── LLM diagnostics — surfaces exact reason behind heuristic_fallback ────────
+# These endpoints exist because "the LLM didn't work" has ~6 distinct root
+# causes (empty key, bad model name, expired key, blocked by safety filter,
+# Vault overwrote env, missing SDK).  Guessing wastes a rebuild cycle each
+# time; a single curl tells you which it is.
+
+@router.get("/admin/llm-status")
+async def admin_llm_status() -> dict:
+    """Return the pod's effective LLM configuration without leaking values.
+
+    Shows provider key *counts* (comma-separated entries), the model chain,
+    and Vault state.  Safe to expose — no secret material is returned.
+    """
+    from app.utils.config import settings
+    from app.llm.client import _model_chain, _keys_for, _provider
+
+    def _count(raw: str) -> int:
+        return len([k for k in (raw or "").split(",") if k.strip()])
+
+    chain = _model_chain()
+    chain_view = [
+        {
+            "model": m,
+            "provider": _provider(m),
+            "key_count": len([k for k in _keys_for(m) if k]),
+        }
+        for m in chain
+    ]
+
+    # Vault state (best-effort — may not be reachable from this pod).
+    vault_state: dict = {
+        "addr_set": bool(settings.vault_addr),
+        "token_set": bool(settings.vault_token),
+    }
+    if settings.vault_addr and settings.vault_token:
+        try:
+            from app.utils.vault_client import get_vault_secrets
+            v = get_vault_secrets()
+            vault_state["reachable"] = True
+            vault_state["keys_returned"] = sorted(v.keys())
+        except Exception as exc:  # noqa: BLE001
+            vault_state["reachable"] = False
+            vault_state["error"] = str(exc)
+
+    return {
+        "model_chain": chain_view,
+        "provider_key_counts": {
+            "google":    _count(settings.google_api_keys),
+            "anthropic": _count(settings.anthropic_api_keys),
+            "openai":    _count(settings.openai_api_keys),
+            "generic_llm_api_key": 1 if settings.llm_api_key else 0,
+        },
+        "vault": vault_state,
+        "settings_ok": True,
+    }
+
+
+@router.post("/admin/llm-ping")
+async def admin_llm_ping() -> dict:
+    """Send a minimal real call to the configured LLM and return the result.
+
+    Definitive diagnostic — surfaces the verbatim provider error (404, 403,
+    rate-limit, etc.) without needing to comb through pod logs.  Uses a tiny
+    prompt to minimize cost (well under one cent per call).
+    """
+    from app.utils.config import settings
+    from app.llm.client import (
+        _model_chain,
+        _keys_for,
+        _provider,
+        _call_anthropic,
+        _call_gemini,
+        _call_openai,
+    )
+
+    chain = _model_chain()
+    attempts: list[dict] = []
+
+    PING_PROMPT = (
+        'Respond with the exact JSON: '
+        '{"root_cause":"ping","suggestion":"ping",'
+        '"proposed_action":{"type":"no_action","target":"ping","reason":"ping"}}'
+    )
+
+    for model in chain:
+        provider = _provider(model)
+        keys = _keys_for(model)
+        if not any(keys):
+            attempts.append({
+                "model": model,
+                "provider": provider,
+                "ok": False,
+                "error": "no api key configured for this provider",
+            })
+            continue
+
+        try:
+            if provider == "google":
+                result = await _call_gemini(PING_PROMPT, "_ping", 5, model, keys[0])
+            elif provider == "openai":
+                result = await _call_openai(PING_PROMPT, "_ping", 5, model, keys[0])
+            else:
+                result = await _call_anthropic(PING_PROMPT, "_ping", 5, model, keys[0])
+            attempts.append({
+                "model": model,
+                "provider": provider,
+                "ok": True,
+                "response_keys": sorted(result.keys()),
+                "root_cause": str(result.get("root_cause", ""))[:60],
+            })
+            return {"first_ok_model": model, "attempts": attempts}
+        except Exception as exc:  # noqa: BLE001
+            attempts.append({
+                "model": model,
+                "provider": provider,
+                "ok": False,
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:400],
+            })
+
+    return {"first_ok_model": None, "attempts": attempts}
 
 
 # ── Phase 8b — evaluation metrics dashboard (JSON) ───────────────────────────
@@ -232,6 +365,60 @@ async def pipeline_failure_webhook(request: Request) -> dict:
     """
     from app.api.v1.webhooks import handle_pipeline_failure
     return await handle_pipeline_failure(request)
+
+
+# ── Multi-platform refactor — registry introspection ─────────────────────────
+
+
+@router.get("/platforms")
+async def list_platforms() -> dict:
+    """List every registered platform with its services and topology.
+
+    Used by the dashboard, by SpyRoom-style integration tests, and by
+    operators verifying their yaml landed correctly after deploy.
+    """
+    reg = get_registry()
+    return {
+        "platforms": [
+            {
+                "name": p.name,
+                "namespace": p.namespace,
+                "environments": p.environments,
+                "dry_run_envs": p.dry_run_envs,
+                "log_index_pattern": p.log_index_pattern,
+                "gitlab_project": p.gitlab_project,
+                "owners": p.owners,
+                "services": [
+                    {
+                        "name": s.name,
+                        "language": s.language,
+                        "criticality": s.criticality,
+                        "depends_on": s.depends_on,
+                        "description": s.description,
+                    }
+                    for s in p.services
+                ],
+                "metadata": p.metadata,
+            }
+            for p in reg.all()
+        ]
+    }
+
+
+@router.get("/platforms/{name}")
+async def get_platform(name: str) -> dict:
+    """Return a single platform's full config (or 404)."""
+    plat = get_registry().get(name)
+    if plat is None:
+        raise HTTPException(status_code=404, detail=f"platform '{name}' not found")
+    return plat.model_dump()
+
+
+@router.post("/admin/reload-platforms")
+async def admin_reload_platforms(_auth: None = Depends(require_admin_key)) -> dict:
+    """Hot-reload ``configs/platforms/*.yaml`` from disk.  SIGHUP also triggers this."""
+    reg = reload_registry()
+    return {"platforms": reg.names(), "count": len(reg.all())}
 
 
 # ── Phase 11d — human approval workflow ──────────────────────────────────────
