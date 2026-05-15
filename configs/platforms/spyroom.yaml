@@ -1,0 +1,90 @@
+# SpyRoom Platform — first real (non-demo) onboarded application.
+#
+# Source repo:   https://gitlab.com/spe-group2/spyroom-platform
+# Stack:         Next.js (frontend) + Spring Boot (Java microservices) +
+#                PostgreSQL + Redis + Docker Compose / Kubernetes
+# Communication: REST + WebSockets, JWT auth (HS256)
+#
+# The Copilot does NOT contain SpyRoom source — only its observability and
+# incident-response metadata.  Logs reach the Copilot via Filebeat scraping
+# the `spyroom` namespace (see k8s/platforms/spyroom/filebeat-namespace-patch.yaml).
+name: spyroom
+namespace: spyroom
+environments: [dev, staging, production]
+dry_run_envs: [dev]
+
+# SpyRoom logs go to the shared ELK cluster under the same daily index pattern.
+# Per-platform index split is a future-proofing knob (uncomment when noisy):
+#   log_index_pattern: devops-logs-spyroom-*
+log_index_pattern: spyroom-logs-*
+log_service_field: service
+
+services:
+  # ── Edge ──────────────────────────────────────────────────────────────────
+  - name: api-gateway
+    language: java
+    log_format: json
+    depends_on: [auth-service, room-service]
+    criticality: high
+    description: "Spring Cloud Gateway — routes /auth/** and /rooms/** traffic"
+    container_name: api-gateway
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  - name: auth-service
+    language: java
+    log_format: json
+    depends_on: [postgres]
+    criticality: critical
+    description: "JWT signer + user registration/login.  An outage logs everyone out."
+    container_name: auth-service
+
+  # ── Rooms / Messaging ─────────────────────────────────────────────────────
+  - name: room-service
+    language: java
+    log_format: json
+    depends_on: [postgres, redis]
+    criticality: high
+    description: "Room CRUD + chat messages + WebSocket fan-out"
+    container_name: room-service
+
+  # ── Frontend ──────────────────────────────────────────────────────────────
+  - name: spyroom-frontend
+    language: node
+    log_format: json
+    depends_on: [api-gateway]
+    criticality: medium
+    description: "Next.js app router UI"
+    container_name: web-app
+
+  # ── Data plane ────────────────────────────────────────────────────────────
+  # Listed so they show up in the dependency graph + blast-radius computation,
+  # even though the Copilot will not propose destructive actions against them.
+  - name: postgres
+    language: ""
+    log_format: plain
+    depends_on: []
+    criticality: critical
+    deployment_kind: StatefulSet
+    description: "Multi-database Postgres instance (auth_db, room_db)"
+
+  - name: redis
+    language: ""
+    log_format: plain
+    depends_on: []
+    criticality: high
+    description: "Pub/sub for WebSocket fan-out + room presence"
+
+# ── Cross-repo wiring ────────────────────────────────────────────────────────
+gitlab_project: "spe-group2/spyroom-platform"
+repo_url: "https://gitlab.com/spe-group2/spyroom-platform"
+
+owners:
+  # Replace with real Slack handles before production
+  - "@spyroom-oncall"
+
+metadata:
+  description: "SpyRoom chat platform — interview/portfolio scale microservices"
+  docs_url: "https://gitlab.com/spe-group2/spyroom-platform/-/blob/main/readme.md"
+  dashboard_url: "http://localhost:3001/d/spyroom-overview"
+  # Topology summary used by docs/PLATFORMS.md and the dashboard timeline:
+  topology: "frontend → api-gateway → {auth-service → postgres, room-service → {postgres, redis}}"

@@ -1,0 +1,21 @@
+# Fallback platform for any service not explicitly registered.
+#
+# The registry returns this entry when:
+#   * `analyze` is called with neither `platform` nor a service known to any
+#     registered platform
+#   * No yaml files exist at all (clean checkout)
+#
+# Keep this file conservative: lowest-risk defaults, dev-only dry-run, no
+# automated assumptions about dependencies.
+name: default
+namespace: default
+environments: [dev, staging, production]
+dry_run_envs: [dev]
+log_index_pattern: devops-logs-*
+log_service_field: service
+
+services: []
+
+owners: []
+metadata:
+  description: "Catch-all platform for unregistered services"

@@ -1,0 +1,19 @@
+---
+# SpyRoom namespace — owned by the SpyRoom team but lives in the same
+# Minikube cluster as the DevOps Copilot so logs can flow into the shared
+# ELK stack via the Filebeat DaemonSet running in kube-system.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spyroom
+  labels:
+    app.kubernetes.io/managed-by: ai-devops-copilot
+    devops-copilot/platform: spyroom
+    # Filebeat path filter includes any namespace listed here (see
+    # k8s/elk/filebeat.yaml).  Adding `_spyroom_` to that filter is enough
+    # for logs to start flowing.
+    devops-copilot/scrape: "true"
+  annotations:
+    devops-copilot/gitlab-project: "spe-group2/spyroom-platform"
+    devops-copilot/owner: "@spyroom-oncall"
+    devops-copilot/description: "SpyRoom chat platform — Next.js + Spring Boot microservices"

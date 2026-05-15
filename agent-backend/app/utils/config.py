@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     anthropic_api_keys: str = ""
     openai_api_keys: str = ""
 
-    llm_model: str = "gemma-4-31b-it"
+    # Default model — must resolve against Google's public Generative AI API.
+    # "gemma-4-31b-it" historically defaulted here but is not exposed publicly
+    # on the v1beta endpoint, so calls 404 with no key/quota rotation possible.
+    # Override per-deployment via LLM_MODEL env var or the llm-credentials Secret.
+    llm_model: str = "gemini-1.5-flash"
     llm_model_fallback: str = ""
 
     environment: str = "dev"
@@ -48,7 +52,30 @@ class Settings(BaseSettings):
     # Admin API key — protects /admin/* and /services/*/unfreeze endpoints
     admin_api_key: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # ── Multi-platform refactor ──────────────────────────────────────────
+    # Directory containing platform yaml files.  The registry seeds itself
+    # with a default fallback when this is absent, so tests and clean
+    # checkouts keep working without any configs.
+    platforms_dir: str = "configs/platforms"
+
+    # ── GitLab integration (Phase 11 + multi-platform refactor) ──────────
+    # X-Gitlab-Token shared secret used to authenticate incoming webhooks.
+    # Generate with: openssl rand -hex 32
+    gitlab_webhook_token: str = ""
+    # Read-only API access for posting MR comments back to GitLab projects.
+    gitlab_api_url: str = "https://gitlab.com"
+    gitlab_api_token: str = ""
+
+    # `extra="ignore"` — be tolerant of legacy env-var spellings (e.g. the
+    # singular GOOGLE_API_KEY some operators set instead of GOOGLE_API_KEYS).
+    # Without this, pydantic-settings v2 raises ValidationError at startup
+    # and the pod crash-loops with no LLM availability.  We compensate by
+    # mapping known singular aliases below in the post-init step.
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 def _apply_vault_overrides(s: Settings) -> Settings:
@@ -79,4 +106,27 @@ def _apply_vault_overrides(s: Settings) -> Settings:
     return s
 
 
-settings: Settings = _apply_vault_overrides(Settings())
+def _apply_singular_aliases(s: Settings) -> Settings:
+    """Backfill plural key-list fields from the singular env vars.
+
+    Some operators set ``GOOGLE_API_KEY=<single key>`` instead of the
+    comma-separated ``GOOGLE_API_KEYS=<key1,key2,...>`` that the rotation
+    code expects.  Read the singular form from ``os.environ`` and use it as
+    the fallback so a single key still works without any config change.
+    """
+    if not s.google_api_keys:
+        single = os.environ.get("GOOGLE_API_KEY", "").strip()
+        if single:
+            s.google_api_keys = single
+    if not s.anthropic_api_keys:
+        single = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if single:
+            s.anthropic_api_keys = single
+    if not s.openai_api_keys:
+        single = os.environ.get("OPENAI_API_KEY", "").strip()
+        if single:
+            s.openai_api_keys = single
+    return s
+
+
+settings: Settings = _apply_singular_aliases(_apply_vault_overrides(Settings()))

@@ -1,0 +1,50 @@
+name: spyroom
+namespace: spyroom
+
+environments:
+  - dev
+
+dry_run_envs:
+  - dev
+
+log_index_pattern: "spyroom-logs-*"
+log_service_field: "service"
+
+services:
+  - name: room-service
+    language: java
+    criticality: medium
+    deployment_kind: Deployment
+    container_name: room-service
+
+  - name: auth-service
+    language: java
+    criticality: high
+    deployment_kind: Deployment
+    container_name: auth-service
+
+  - name: api-gateway
+    language: java
+    criticality: high
+    deployment_kind: Deployment
+    container_name: api-gateway
+
+  - name: frontend
+    language: node
+    criticality: low
+    deployment_kind: Deployment
+    container_name: frontend
+
+# ── Cross-repo wiring (Contract C — pipeline-failure webhook) ───────────────
+# Used by app/api/v1/webhooks.py to map an incoming GitLab pipeline-failure
+# event back to this platform.  PlatformRegistry.get_by_gitlab_project()
+# matches on full path, last-segment, or substring — set both keys when the
+# repo is hosted under a group.
+gitlab_project: "spe-group2/spyroom-platform"
+repo_url:       "https://gitlab.com/spe-group2/spyroom-platform"
+
+owners:
+  - "@spyroom-oncall"
+
+metadata:
+  description: "SpyRoom chat platform"

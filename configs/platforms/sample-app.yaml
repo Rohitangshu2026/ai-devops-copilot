@@ -1,0 +1,40 @@
+# sample-app — the original demo platform that ships with the Copilot.
+#
+# Captures the pre-refactor hardcoded behaviour in declarative form so the
+# registry can serve identical results to callers that don't supply a
+# platform name.
+name: sample-app
+namespace: default
+environments: [dev, staging, production]
+dry_run_envs: [dev]
+log_index_pattern: devops-logs-*
+log_service_field: service
+
+services:
+  - name: sample-app
+    language: python
+    log_format: json
+    depends_on: [elasticsearch]
+    criticality: low
+    description: "FastAPI demo service with failure-mode endpoints (/error, /slow, /oom, /crash, /dep-error)"
+
+  - name: agent-backend
+    language: python
+    log_format: json
+    depends_on: [elasticsearch]
+    criticality: medium
+    description: "The AI DevOps Copilot itself — self-monitoring"
+
+  - name: mock-downstream
+    language: python
+    log_format: json
+    depends_on: []
+    criticality: low
+    description: "Scale-to-zero mock used by /dep-error e2e tests"
+
+gitlab_project: "spe-group2/ai-devops-copilot"
+repo_url: "https://gitlab.com/spe-group2/ai-devops-copilot"
+
+owners: []
+metadata:
+  description: "Built-in demo platform; treat as a reference implementation"
