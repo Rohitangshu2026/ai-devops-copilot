@@ -1,0 +1,17 @@
+[
+  {"message": "WebSocket session opened: user=alice room=42", "level": "INFO", "@timestamp": "2026-05-13T12:30:01Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "WebSocket session opened: user=bob room=42", "level": "INFO", "@timestamp": "2026-05-13T12:30:03Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "POST /rooms/42/messages 200 OK", "level": "INFO", "@timestamp": "2026-05-13T12:30:11Z", "endpoint": "/rooms/42/messages", "status_code": 200, "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "Redis pub/sub broadcast OK (room=42, subscribers=2)", "level": "INFO", "@timestamp": "2026-05-13T12:30:12Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /healthz 200 OK", "level": "INFO", "@timestamp": "2026-05-13T12:30:20Z", "endpoint": "/healthz", "status_code": 200, "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "redis.clients.jedis.exceptions.JedisConnectionException: Could not get a resource from the pool", "level": "ERROR", "@timestamp": "2026-05-13T12:31:02Z", "service": "room-service", "environment": "production", "platform": "spyroom", "error": "JedisConnectionException"},
+  {"message": "Failed to publish message to redis channel 'room:42': connect timed out", "level": "ERROR", "@timestamp": "2026-05-13T12:31:02Z", "endpoint": "/rooms/42/messages", "status_code": 502, "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "WebSocket session abruptly closed: user=alice room=42 reason=BROKER_DOWN", "level": "ERROR", "@timestamp": "2026-05-13T12:31:05Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "WebSocket session abruptly closed: user=bob room=42 reason=BROKER_DOWN", "level": "ERROR", "@timestamp": "2026-05-13T12:31:05Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "POST /rooms/42/messages 502 Bad Gateway", "level": "ERROR", "@timestamp": "2026-05-13T12:31:10Z", "endpoint": "/rooms/42/messages", "status_code": 502, "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "redis.clients.jedis.exceptions.JedisConnectionException: Could not get a resource from the pool", "level": "ERROR", "@timestamp": "2026-05-13T12:31:15Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "Connection refused: redis:6379", "level": "ERROR", "@timestamp": "2026-05-13T12:31:17Z", "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "POST /rooms/55/messages 502 Bad Gateway", "level": "ERROR", "@timestamp": "2026-05-13T12:31:22Z", "endpoint": "/rooms/55/messages", "status_code": 502, "service": "room-service", "environment": "production", "platform": "spyroom"},
+  {"message": "Liveness probe failed: dial tcp 10.244.0.22:6379: connect: connection refused", "level": "ERROR", "@timestamp": "2026-05-13T12:31:25Z", "service": "redis", "environment": "production", "platform": "spyroom"},
+  {"message": "Pod redis-0 evicted: NodeOutOfMemory", "level": "ERROR", "@timestamp": "2026-05-13T12:31:30Z", "service": "redis", "environment": "production", "platform": "spyroom"}
+]

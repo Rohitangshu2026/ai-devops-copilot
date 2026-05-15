@@ -1,0 +1,18 @@
+[
+  {"message": "GET /auth/me 200 OK", "level": "INFO", "@timestamp": "2026-05-13T11:00:01Z", "endpoint": "/auth/me", "status_code": 200, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /rooms 200 OK", "level": "INFO", "@timestamp": "2026-05-13T11:00:08Z", "endpoint": "/rooms", "status_code": 200, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "POST /auth/login 200 OK", "level": "INFO", "@timestamp": "2026-05-13T11:00:14Z", "endpoint": "/auth/login", "status_code": 200, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /healthz 200 OK", "level": "INFO", "@timestamp": "2026-05-13T11:00:20Z", "endpoint": "/healthz", "status_code": 200, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "io.netty.handler.timeout.ReadTimeoutException", "level": "ERROR", "@timestamp": "2026-05-13T11:01:02Z", "endpoint": "/auth/me", "status_code": 504, "service": "api-gateway", "environment": "production", "platform": "spyroom", "error": "ReadTimeoutException"},
+  {"message": "GET /auth/me 504 Gateway Timeout", "level": "ERROR", "@timestamp": "2026-05-13T11:01:02Z", "endpoint": "/auth/me", "status_code": 504, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "Slow upstream: auth-service responded in 31200ms (deadline 5000ms)", "level": "WARNING", "@timestamp": "2026-05-13T11:01:03Z", "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /auth/me 504 Gateway Timeout", "level": "ERROR", "@timestamp": "2026-05-13T11:01:15Z", "endpoint": "/auth/me", "status_code": 504, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "io.netty.handler.timeout.ReadTimeoutException", "level": "ERROR", "@timestamp": "2026-05-13T11:01:15Z", "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /rooms 502 Bad Gateway", "level": "ERROR", "@timestamp": "2026-05-13T11:01:18Z", "endpoint": "/rooms", "status_code": 502, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "Circuit breaker [auth-service] transitioned to OPEN", "level": "ERROR", "@timestamp": "2026-05-13T11:01:22Z", "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /auth/me 503 Service Unavailable (circuit open)", "level": "ERROR", "@timestamp": "2026-05-13T11:01:25Z", "endpoint": "/auth/me", "status_code": 503, "service": "api-gateway", "environment": "production", "platform": "spyroom"},
+  {"message": "Slow SQL: SELECT * FROM users WHERE email = ? took 28104ms", "level": "WARNING", "@timestamp": "2026-05-13T11:01:01Z", "service": "auth-service", "environment": "production", "platform": "spyroom"},
+  {"message": "HikariPool-1 - Connection is not available, request timed out after 30000ms.", "level": "ERROR", "@timestamp": "2026-05-13T11:01:31Z", "service": "auth-service", "environment": "production", "platform": "spyroom"},
+  {"message": "POST /auth/login 500 Internal Server Error", "level": "ERROR", "@timestamp": "2026-05-13T11:01:32Z", "endpoint": "/auth/login", "status_code": 500, "service": "auth-service", "environment": "production", "platform": "spyroom"},
+  {"message": "GET /rooms 502 Bad Gateway", "level": "ERROR", "@timestamp": "2026-05-13T11:01:35Z", "endpoint": "/rooms", "status_code": 502, "service": "api-gateway", "environment": "production", "platform": "spyroom"}
+]

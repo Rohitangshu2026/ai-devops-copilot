@@ -1,0 +1,12 @@
+{
+  "platform": "spyroom",
+  "service": "api-gateway",
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "expected_causality_target": "auth-service",
+  "expected_blast_radius": "high",
+  "root_cause_keywords": ["ReadTimeoutException", "auth-service", "504", "Hikari", "Circuit breaker"],
+  "description": "api-gateway 504s and 502s are a cascade from slow SQL queries in auth-service exhausting the HikariCP connection pool. The Copilot must trace the cascade upstream (gateway → auth-service → postgres) and recommend acting on auth-service, not the gateway. Blast radius is high because the gateway fronts all traffic."
+}

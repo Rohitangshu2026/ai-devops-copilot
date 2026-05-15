@@ -28,21 +28,3 @@ spec:
       ports:
         - protocol: TCP
           port: 8001
-
----
-# sample-app can receive traffic from anywhere (it's the user-facing app)
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: sample-app-ingress
-  namespace: default
-spec:
-  podSelector:
-    matchLabels:
-      app: sample-app
-  policyTypes:
-    - Ingress
-  ingress:
-    - ports:
-        - protocol: TCP
-          port: 8000

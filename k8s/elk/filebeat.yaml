@@ -37,6 +37,12 @@ data:
                         log.file.path: "_default_"
                     - contains:
                         log.file.path: "_devops-test_"
+                    # Onboarded platforms — add a new entry per namespace.
+                    # See k8s/platforms/<platform>/namespace.yaml.  The
+                    # namespace name is embedded in the container log
+                    # filename as `_<namespace>_`.
+                    - contains:
+                        log.file.path: "_spyroom_"
 
     # Logstash handles ILM and template setup
     setup.template.enabled: false

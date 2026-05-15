@@ -1,0 +1,11 @@
+{
+  "platform": "spyroom",
+  "service": "room-service",
+  "error_type": "dependency_error",
+  "severity": "critical",
+  "correct_action": "notify",
+  "should_act": true,
+  "expected_causality_target": "postgres",
+  "root_cause_keywords": ["Connection refused", "postgres", "5432", "PSQLException"],
+  "description": "Postgres StatefulSet is in CrashLoopBackOff; both auth-service and room-service are unable to reach the DB. The Copilot must detect the dependency_error pattern, redirect the action target from room-service to postgres, and downgrade to notify (not auto-restart a StatefulSet)."
+}

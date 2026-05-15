@@ -1,0 +1,11 @@
+{
+  "platform": "spyroom",
+  "service": "room-service",
+  "error_type": "dependency_error",
+  "severity": "high",
+  "correct_action": "notify",
+  "should_act": true,
+  "expected_causality_target": "redis",
+  "root_cause_keywords": ["JedisConnectionException", "redis", "6379", "WebSocket", "BROKER_DOWN"],
+  "description": "Redis pod was evicted (NodeOutOfMemory); room-service can no longer publish to the pub/sub channel that powers WebSocket fan-out. All active sessions disconnect with reason=BROKER_DOWN. The fix is to restart redis (or schedule it elsewhere), not room-service — the Copilot must route the action target to the dependency."
+}
