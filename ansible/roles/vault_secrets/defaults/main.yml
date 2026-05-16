@@ -14,5 +14,9 @@ anthropic_api_keys: ""
 openai_api_keys: ""
 llm_model: "gemma-4-31b-it"
 
-# How long to wait for Vault to become ready
-vault_ready_timeout: 60
+# How long to wait for Vault to become ready. 240s matches the app_deploy
+# rollout-status timeout and covers a cold pull of hashicorp/vault:1.17
+# (~440 MB, ~40 s on a fresh runner) plus Vault dev-mode bootstrap (~15 s)
+# with comfortable headroom. The previous 60 s consistently failed first-
+# deploys on a fresh runner.
+vault_ready_timeout: 240
