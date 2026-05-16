@@ -1,15 +1,14 @@
 ---
-# AI DevOps Copilot — full deployment playbook
+# AI DevOps Copilot — deployment playbook.
 #
-# Roles executed in order:
-#   1. vault_secrets  — deploys HashiCorp Vault and writes LLM credentials
-#   2. elk_stack      — Elasticsearch StatefulSet + Logstash + Kibana + Filebeat DaemonSet
-#   3. monitoring     — Prometheus + Grafana with agent-backend dashboard
-#   4. app_deploy     — sample-app + agent-backend Deployments, Services, HPAs, RBAC
-#
-# All roles are idempotent: running the playbook multiple times produces
-# the same result as running it once.  Each role can also be skipped via
-# Ansible tags (e.g. --skip-tags monitoring).
+# Per the cross-repo contract with spyroom-platform (see
+# docs/CROSS_REPO_CONTRACT.md):
+#   * spyroom-platform owns Vault (namespace=vault), ELK (namespace=logging),
+#     and Prometheus/Grafana (namespace=monitoring). They must be deployed
+#     BEFORE this playbook runs.
+#   * This repo deploys only agent-backend (+ sample-app for evals) into the
+#     `default` namespace, and writes its LLM credentials into spyroom's
+#     Vault at secret/llm-credentials.
 #
 # CI invocation (self-hosted runner on Mac):
 #   ansible-playbook -i inventory.ini deploy.yml \
@@ -25,7 +24,5 @@
   hosts: local
   gather_facts: false
   roles:
-    - { role: vault_secrets, tags: [vault, secrets] }
-    - { role: elk_stack,     tags: [elk, logs] }
-    - { role: monitoring,    tags: [monitoring, metrics] }
-    - { role: app_deploy,    tags: [app, deploy] }
+    - { role: llm_secrets, tags: [vault, secrets] }
+    - { role: app_deploy,  tags: [app, deploy] }

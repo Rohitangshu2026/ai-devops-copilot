@@ -1,0 +1,77 @@
+---
+# Seed agent-backend's LLM credentials into spyroom's existing Vault instance.
+#
+# Pre-requisite: spyroom-platform's `vault` role has already been applied —
+# this lives in the `vault` namespace and is the authoritative Vault for the
+# whole cluster. We never deploy our own Vault; we only write to spyroom's.
+#
+# pod-side env vars: `kubectl exec` does NOT propagate the Ansible host
+# environment, so VAULT_ADDR/VAULT_TOKEN are exported inside `sh -c '...'`
+# blocks on the target pod.
+
+- name: Locate spyroom's Vault pod
+  command: >
+    kubectl get pod -n {{ vault_namespace }}
+    -l {{ vault_label_selector }}
+    -o jsonpath={.items[0].metadata.name}
+  register: vault_pod
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: vault_pod.rc == 0 and vault_pod.stdout != ""
+
+- name: Wait for spyroom's Vault API to respond
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      vault status
+    '
+  register: vault_status
+  until: vault_status.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
+
+- name: Ensure KV v2 secrets engine is mounted (idempotent, no-op if spyroom already mounted it)
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      if ! vault secrets list -format=json | grep -q "\"{{ vault_kv_mount }}/\""; then
+        vault secrets enable -version=2 -path={{ vault_kv_mount }} kv
+      fi
+    '
+  register: kv_enable
+  changed_when: "'Success!' in kv_enable.stdout"
+
+- name: Write LLM credentials to spyroom Vault at secret/llm-credentials
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      vault kv put {{ vault_kv_mount }}/{{ vault_secret_path }} \
+        LLM_API_KEY="{{ llm_api_key | default('') }}" \
+        GOOGLE_API_KEYS="{{ google_api_keys | default('') }}" \
+        ANTHROPIC_API_KEYS="{{ anthropic_api_keys | default('') }}" \
+        OPENAI_API_KEYS="{{ openai_api_keys | default('') }}" \
+        LLM_MODEL="{{ llm_model | default('gemma-4-31b-it') }}"
+    '
+  changed_when: true
+  no_log: true
+
+- name: Verify secret was written (read back LLM_MODEL field)
+  shell: |
+    kubectl exec -n {{ vault_namespace }} {{ vault_pod.stdout }} -- sh -c '
+      export VAULT_ADDR=http://127.0.0.1:{{ vault_port }}
+      export VAULT_TOKEN="{{ vault_root_token }}"
+      vault kv get -field=LLM_MODEL {{ vault_kv_mount }}/{{ vault_secret_path }}
+    '
+  register: vault_verify
+  changed_when: false
+  no_log: true
+
+- name: Confirm secret-seed succeeded
+  debug:
+    msg: "LLM credentials seeded into spyroom Vault at {{ vault_kv_mount }}/{{ vault_secret_path }} (LLM_MODEL={{ vault_verify.stdout }})"
+  when: vault_verify.rc == 0

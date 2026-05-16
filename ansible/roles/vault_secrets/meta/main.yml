@@ -1,6 +1,0 @@
----
-galaxy_info:
-  role_name: vault_secrets
-  description: Provision HashiCorp Vault and store LLM credentials as KV secrets
-  min_ansible_version: "2.9"
-dependencies: []

@@ -11,7 +11,7 @@ metadata:
     devops-copilot/criticality: "medium"
     # Services this deployment depends on (comma-separated).
     # Used by dynamic dependency map in causality.py.
-    devops-copilot/depends-on: "elasticsearch"
+    devops-copilot/depends-on: "elasticsearch,vault,prometheus"
 spec:
   replicas: 1
   selector:
@@ -26,6 +26,13 @@ spec:
     metadata:
       labels:
         app: agent-backend
+      annotations:
+        # Picked up by spyroom-owned Prometheus, which scrapes any pod in
+        # any namespace that sets these annotations. Removes the need for
+        # ai-devops to deploy its own Prometheus.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8001"
     spec:
       # ServiceAccount grants the pod RBAC access to the k8s API
       # (read pods/events, update deployments for action execution).
@@ -43,36 +50,55 @@ spec:
               memory: "512Mi"
               cpu: "500m"
           env:
+            # spyroom-platform owns the ELK stack in the `logging` namespace
+            # and ships its app logs to index pattern spyroom-logs-YYYY.MM.dd.
+            # See ai-devops/docs/CROSS_REPO_CONTRACT.md.
             - name: ES_URL
               value: "http://elasticsearch.logging.svc.cluster.local:9200"
             - name: ES_INDEX
-              value: "devops-logs-*"
+              value: "spyroom-logs-*"
             - name: ENVIRONMENT
               value: "production"
-            # Vault address — agent reads LLM credentials from Vault
-            # if available; falls back to llm-credentials Secret.
+            # Vault address — spyroom-platform owns the dev-mode Vault in the
+            # `vault` namespace with root token "root". The llm_secrets role
+            # in this repo writes LLM creds to secret/llm-credentials there.
             - name: VAULT_ADDR
               value: "http://vault.vault.svc.cluster.local:8200"
             - name: VAULT_TOKEN
-              value: "devops-copilot-root-token"
+              value: "root"
+            # Prometheus owned by spyroom in `monitoring` namespace.
             - name: PROMETHEUS_URL
               value: "http://prometheus.monitoring.svc.cluster.local:9090"
           envFrom:
             - secretRef:
                 name: llm-credentials
                 optional: true   # optional — Vault takes precedence when reachable
+          # startupProbe gates liveness/readiness while uvicorn warms up and
+          # the LLM client libraries (anthropic, google-genai) finish their
+          # cold-path imports — observed at 15-25 s on this hardware.
+          # 30 s + 30 polls × 5 s = 180 s budget.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 10
-            periodSeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service

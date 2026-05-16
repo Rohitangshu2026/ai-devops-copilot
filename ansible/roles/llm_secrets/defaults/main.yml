@@ -1,0 +1,31 @@
+---
+# llm_secrets role — seed LLM credentials into spyroom's shared Vault.
+#
+# We do NOT deploy Vault here. spyroom-platform owns the Vault instance in
+# the `vault` namespace (per the cross-repo contract). This role just writes
+# the agent-backend's LLM credentials into a Vault KV path that doesn't
+# collide with spyroom's own secrets.
+#
+# Cross-repo contract:
+#   - Vault address: http://vault.vault.svc.cluster.local:8200 (spyroom-owned)
+#   - spyroom writes secrets at: secret/spyroom/app
+#   - we write secrets at:       secret/llm-credentials   (this role)
+
+vault_namespace: "vault"
+vault_label_selector: "app=vault"
+vault_port: 8200
+# spyroom's Vault is in dev mode with -dev-root-token-id=root.
+# In production, replace with a scoped token issued by a Vault policy.
+vault_root_token: "root"
+vault_kv_mount: "secret"
+vault_secret_path: "llm-credentials"
+
+# Credentials to write into Vault (overridden via CI -e flags)
+llm_api_key: ""
+google_api_keys: ""
+anthropic_api_keys: ""
+openai_api_keys: ""
+llm_model: "gemma-4-31b-it"
+
+# How long to wait for the (already-running) spyroom Vault to be reachable.
+vault_ready_timeout: 120
