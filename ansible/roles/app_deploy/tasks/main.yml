@@ -46,32 +46,11 @@
     -n {{ k8s_namespace }}
   changed_when: true
 
-- name: Apply sample-app Deployment
-  command: >
-    kubectl apply -f {{ playbook_dir }}/../k8s/deployment.yaml
-    -n {{ k8s_namespace }}
-  register: deploy_result
-  changed_when: "'configured' in deploy_result.stdout or 'created' in deploy_result.stdout"
-
-- name: Update sample-app image to current build
-  command: >
-    kubectl set image deployment/sample-app
-    sample-app={{ sample_app_image }}
-    -n {{ k8s_namespace }}
-  changed_when: true
-  when: sample_app_image != "logicule/sample-app:latest"
-
-- name: Apply sample-app Service
-  command: >
-    kubectl apply -f {{ playbook_dir }}/../k8s/service.yaml
-    -n {{ k8s_namespace }}
-  changed_when: true
-
-- name: Apply sample-app HPA
-  command: >
-    kubectl apply -f {{ playbook_dir }}/../k8s/hpa.yaml
-    -n {{ k8s_namespace }}
-  changed_when: true
+# sample-app deployment removed — the agent now observes spyroom-platform
+# directly via the cross-repo contract (logs from spyroom-logs-* in ES,
+# k8s events from the spyroom namespace). The sample-app source and eval
+# scenarios under sample-app/ and evals/ remain for offline regression
+# testing; we just don't waste cluster CPU running it during normal deploys.
 
 - name: Apply agent-backend HPA
   command: >
@@ -93,13 +72,6 @@
   changed_when: true
   when: agent_image != "logicule/agent-backend:latest"
 
-- name: Wait for sample-app rollout
-  command: >
-    kubectl rollout status deployment/sample-app
-    -n {{ k8s_namespace }}
-    --timeout={{ kubectl_timeout }}
-  changed_when: false
-
 - name: Wait for agent-backend rollout
   command: >
     kubectl rollout status deployment/agent-backend
@@ -108,7 +80,7 @@
   changed_when: false
 
 - name: Show deployed pod status
-  command: kubectl get pods -n {{ k8s_namespace }} -l "app in (sample-app,agent-backend)" -o wide
+  command: kubectl get pods -n {{ k8s_namespace }} -l app=agent-backend -o wide
   register: pod_status
   changed_when: false
 
