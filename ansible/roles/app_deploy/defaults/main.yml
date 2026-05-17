@@ -16,3 +16,9 @@ google_api_keys: ""
 anthropic_api_keys: ""
 openai_api_keys: ""
 llm_model: "gemma-4-31b-it"
+
+# Shared secret used to authenticate inbound webhooks from spyroom
+# (X-Gitlab-Token). Set this via the GITLAB_WEBHOOK_TOKEN CI variable.
+# Empty leaves the agent in permissive mode — fine for local dev,
+# unwanted in any shared cluster.
+gitlab_webhook_token: ""

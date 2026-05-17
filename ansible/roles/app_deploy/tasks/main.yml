@@ -72,6 +72,17 @@
   changed_when: true
   when: agent_image != "logicule/agent-backend:latest"
 
+# Inject the shared-secret used to verify inbound webhooks from
+# spyroom (X-Gitlab-Token). Skipped when the CI variable is unset —
+# leaves the agent in permissive mode for local dev runs.
+- name: Set GITLAB_WEBHOOK_TOKEN on agent-backend (webhook auth)
+  command: >
+    kubectl set env deployment/agent-backend
+    GITLAB_WEBHOOK_TOKEN={{ gitlab_webhook_token | default('') }}
+    -n {{ k8s_namespace }}
+  changed_when: true
+  when: (gitlab_webhook_token | default('')) | length > 0
+
 - name: Wait for agent-backend rollout
   command: >
     kubectl rollout status deployment/agent-backend

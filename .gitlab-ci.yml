@@ -199,6 +199,8 @@ deploy:
       -e "google_api_keys=${GOOGLE_API_KEYS:-}"
       -e "anthropic_api_keys=${ANTHROPIC_API_KEYS:-}"
       -e "openai_api_keys=${OPENAI_API_KEYS:-}"
+      -e "llm_model=${LLM_MODEL:-gemma-4-31b-it}"
+      -e "gitlab_webhook_token=${GITLAB_WEBHOOK_TOKEN:-}"
       -e "slack_webhook_url=${SLACK_WEBHOOK_URL:-}"
       -e "approval_secret_key=${APPROVAL_SECRET_KEY:-change-me}"
   environment:
